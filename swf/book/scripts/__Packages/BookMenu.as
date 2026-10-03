@@ -55,6 +55,7 @@ class BookMenu extends MovieClip
    var oContentFmt;      // entry text's format (config font, content size)
    var oBreakFmt;        // blank lines' format, as reading has them (see EditBuildContent)
    var bTextReceived;    // SetBookText has run (EditReady)
+   var sBookText;        // the text reading shows now (SetBookText): ReturnToReading with no text reads it again
    var iDatesStart;      // the title page's date range in EditField (see EditSetDates)
    var iDatesLength;
    var bBlood;           // this writing session is in blood: typed text is red (EditSetBlood)
@@ -515,6 +516,15 @@ class BookMenu extends MovieClip
             b++;
          }
          segs[k].blood = BookMenu.MergeRanges(mine);
+         // The client marks blood rather than colouring it: paint it now (FormatBreaks only repaints edited runs).
+         var red = new TextFormat();
+         red.color = BookMenu.BLOOD_COLOR;
+         var r = 0;
+         while(r < segs[k].blood.length)
+         {
+            this.EditField.setTextFormat(bs + segs[k].blood[r].s, bs + segs[k].blood[r].e, red);
+            r++;
+         }
          k++;
       }
       this.oContentFmt = undefined;
@@ -1027,10 +1037,15 @@ class BookMenu extends MovieClip
       return true;
    }
 
-   // Leave edit mode and read again on the spread being edited, with the text rendered from the saved entries.
+   // Leave edit mode and read again on the spread being edited, with the text rendered from the saved entries (none: the text the book had).
    // Lays it out as the engine's SetBookText does, keeping the engine's page slots where they are.
    function ReturnToReading(text)
    {
+      if(text == undefined || !text.length)
+      {
+         // Nothing was saved: the text the book had.
+         text = this.sBookText;
+      }
       var page = this.iEditPage;
       var left = this.bNote ? page : page - page % 2;
       var setIndex = this.bNote ? page : left - this.iEditShownFrom;
@@ -1599,6 +1614,7 @@ class BookMenu extends MovieClip
       {
          return;
       }
+      this.sBookText = astrText;
       this.ReferenceTextField.verticalAutoSize = "top";
       this.ReferenceTextField.SetText(this.PageHtml(astrText),true);
       if(abNote)

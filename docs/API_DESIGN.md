@@ -65,7 +65,7 @@ A client's own actions while writing (Physical Diaries' new entry and tear-out) 
 
 ## Blanks
 
-`RegisterBlank(form, layout, costs, OnFirstWrite)`. When the player reads the blank from their inventory (with the menu paused), Ink & Quill starts a session with empty content. On the first accepted save, `OnFirstWrite(content)` asks the client for the document that replaces the blank: the client makes its item (a journal, a letter) and returns its form; Ink & Quill removes one blank, shows the new book in the open menu (Physical Diaries' `SetBookMenuBook`) and charges the costs. Read anywhere else (in the world, a container, a shop), a blank is just an empty book.
+Built ([API.md](API.md#blanks), [EDITOR.md](EDITOR.md#blanks)). `RegisterBlank(form, onOpen)`: reading the blank from the player's inventory (with the menu paused) calls the client, which begins a session with its starting text. On the first accepted save the client makes its item and answers with it (`ReplySaveAsBook`); Ink & Quill charges the costs, removes one blank and shows the new book in the open menu. Read anywhere else (in the world, a container, a shop), a blank is just an empty book. When the blank becomes the client's book is the client's choice (2026-10-02): at once (`ReplaceBlank` in `onOpen`) or on the first save (`ReplySaveAsBook`).
 
 ## Limits
 

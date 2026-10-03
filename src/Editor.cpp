@@ -59,12 +59,19 @@ namespace InkAndQuill::Editor {
         bool g_blood = false;                    // this session is in blood (no ink)
         RE::FormID g_beginOnOpen = 0;            // begin g_session once this book is open with its text
 
+        // Blanks (docs/EDITOR.md#blanks).
+        std::unordered_map<RE::FormID, Owner> g_blanks;
+        RE::FormID g_blankOnOpen = 0;   // a blank read from the inventory: open it once its text is in
+        RE::FormID g_openingBlank = 0;  // the blank whose onOpen is running: the session it begins is for it
+        RE::FormID g_sessionBlank = 0;  // the blank the session writes in, until a save replaces it
+
         // The session is over: nothing of it is kept, and the client hears it once (onEnd), last.
         void EndSession()
         {
             auto onEnd = std::move(g_session.client.onEnd);
             g_session = {};
             g_edit.clear();
+            g_sessionBlank = 0;
             if (onEnd) onEnd();
         }
 
@@ -228,6 +235,77 @@ namespace InkAndQuill::Editor {
             return false;
         }
 
+        // ---- Blanks ----
+
+        int CountCarried(RE::TESBoundObject* item)
+        {
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            return player && item ? player->GetInventoryCounts([item](RE::TESBoundObject& i) { return &i == item; })[item] : 0;
+        }
+
+        // Points the open book menu at another book: the engine's globals for the base form and the item's extra
+        // data list (cleared).  From Physical Diaries; VR's list address was inferred there, never run.
+        void SetBookMenuBook(RE::TESObjectBOOK* book)
+        {
+            static REL::Relocation<RE::ExtraDataList**> extraList{ REL::VariantID(519294, 405834, 0x30111F8) };
+            static REL::Relocation<RE::TESObjectBOOK**> menuBook{ REL::VariantID(519295, 405835, 0x3011200) };
+            *extraList = nullptr;
+            *menuBook = book;
+        }
+
+        // One blank goes, and the open menu shows the client's book instead.  False: no such book (the blank stays).
+        bool SwapBlank(RE::FormID blankId, RE::FormID bookId)
+        {
+            auto* book = RE::TESForm::LookupByID<RE::TESObjectBOOK>(bookId);
+            if (!book) {
+                SKSE::log::warn("[Editor] Blank {:08X}: no book {:08X} to replace it, it stays", blankId, bookId);
+                return false;
+            }
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            auto* blank = RE::TESForm::LookupByID<RE::TESBoundObject>(blankId);
+            if (player && blank && CountCarried(blank) > 0) player->RemoveItem(blank, 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
+            SetBookMenuBook(book);
+            SKSE::log::info("[Editor] Blank {:08X} became {:08X}", blankId, bookId);
+            return true;
+        }
+
+        // The first save of a blank's session, answered with a book.
+        void ReplaceBlank(RE::FormID bookId) { SwapBlank(std::exchange(g_sessionBlank, 0), bookId); }
+
+        // A registered blank in the open menu, read from the player's own inventory: in the world, a container, a
+        // shop or the gift menu it's just an empty book.
+        bool IsOwnBlank(RE::TESObjectBOOK* book)
+        {
+            auto* ui = RE::UI::GetSingleton();
+            return book && ui && g_blanks.contains(book->GetFormID()) && !RE::BookMenu::GetTargetReference() &&
+                   !ui->IsMenuOpen(RE::ContainerMenu::MENU_NAME) && !ui->IsMenuOpen(RE::BarterMenu::MENU_NAME) &&
+                   !ui->IsMenuOpen(RE::GiftMenu::MENU_NAME) && CountCarried(book) > 0;
+        }
+
+        // The blank's client decides: begin a session in it, replace it now (ReplaceOpenBlank), or neither.
+        void OpenBlank()
+        {
+            auto* book = RE::BookMenu::GetTargetForm();
+            if (!IsOwnBlank(book) || g_active) return;
+            g_openingBlank = book->GetFormID();
+            const auto owner = g_blanks[g_openingBlank];
+            if (!owner(book)) SKSE::log::info("[Editor] Blank {:08X}: its client didn't begin", book->GetFormID());
+            g_openingBlank = 0;
+        }
+
+        // The book menu opened: a blank of ours waits for its text (AdvanceMovie), then opens.
+        void NoteBlank()
+        {
+            auto* book = RE::BookMenu::GetTargetForm();
+            auto* ui = RE::UI::GetSingleton();
+            if (!IsOwnBlank(book)) return;
+            if (!ui->GameIsPaused()) {
+                Notify(Strings::Get("$IQ_NeedsPause"));
+                return;
+            }
+            g_blankOnOpen = book->GetFormID();
+        }
+
         // ---- Saving ----
 
         enum class SaveResult { Nothing, Saved, Refused, Unreadable };
@@ -257,6 +335,7 @@ namespace InkAndQuill::Editor {
                 Notify(Strings::Get("$IQ_InkRanDry"));
             }
             for (std::size_t i = 0; i < bodies->size(); ++i) g_edit[i] = { (*bodies)[i], false };
+            if (g_sessionBlank != 0) ReplaceBlank(saved.book);
             if (readText) *readText = std::move(saved.text);
             SKSE::log::info("[Editor] Saved");
             return SaveResult::Saved;
@@ -356,13 +435,21 @@ namespace InkAndQuill::Editor {
         void SaveAndRead()
         {
             std::string text;
-            if (!SavedOrStay(&text)) return;
+            const auto result = Save(&text);
+            if (result == SaveResult::Unreadable) Notify(Strings::Get("$IQ_SaveFailed"));
+            if (result == SaveResult::Unreadable || result == SaveResult::Refused) return;
             auto* movie = BookMovie();
             LeaveEditMode();
+            // Saved without a reading text: the client closes the book.  Nothing saved: the SWF reads the text it had.
+            if (result == SaveResult::Saved && text.empty()) {
+                SKSE::log::info("[Editor] No text to read again: closing the book");
+                RequestClose();
+                return;
+            }
             RE::GFxValue arg;
             arg.SetString(text.c_str());
-            if (text.empty() || !movie || !movie->Invoke("_root.BookMenu_mc.ReturnToReading", nullptr, &arg, 1)) {
-                SKSE::log::info("[Editor] Nothing to read again: closing the book");
+            if (!movie || !movie->Invoke("_root.BookMenu_mc.ReturnToReading", nullptr, &arg, 1)) {
+                SKSE::log::warn("[Editor] Couldn't return to reading: closing the book");
                 RequestClose();
             }
         }
@@ -500,7 +587,12 @@ namespace InkAndQuill::Editor {
             }
             if (!WritingTools::HasQuill()) {
                 SKSE::log::info("[Editor] No quill: can't write");
-                ShowNotice(Strings::Get("$IQ_NeedsQuill"));
+                // In a blank a HUD notice, not a prompt: blanks get read often.
+                if (g_sessionBlank != 0) {
+                    Notify(Strings::Get("$IQ_NeedsQuill"));
+                } else {
+                    ShowNotice(Strings::Get("$IQ_NeedsQuill"));
+                }
                 EndSession();
                 return;
             }
@@ -517,6 +609,10 @@ namespace InkAndQuill::Editor {
         {
             auto* book = RE::BookMenu::GetTargetForm();
             if (!book) return;
+            if (IsOwnBlank(book)) {
+                OpenBlank();
+                return;
+            }
             for (const auto& owner : g_owners) {
                 if (owner(book)) return;
             }
@@ -530,8 +626,12 @@ namespace InkAndQuill::Editor {
             RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
                                                   RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
             {
+                if (a_event && a_event->menuName == RE::BookMenu::MENU_NAME && a_event->opening) {
+                    SKSE::GetTaskInterface()->AddUITask([]() { NoteBlank(); });
+                }
                 if (a_event && a_event->menuName == RE::BookMenu::MENU_NAME && !a_event->opening) {
                     LeaveEditMode();
+                    g_blankOnOpen = 0;
                     // A session waiting for this menu that never began.
                     if (std::exchange(g_beginOnOpen, 0) != 0) EndSession();
                 }
@@ -544,14 +644,19 @@ namespace InkAndQuill::Editor {
             static void thunk(RE::IMenu* a_menu, float a_interval, std::uint32_t a_currentTime)
             {
                 func(a_menu, a_interval, a_currentTime);
-                if (g_beginOnOpen == 0 || g_active) return;
+                const RE::FormID waiting = g_beginOnOpen ? g_beginOnOpen : g_blankOnOpen;
+                if (waiting == 0 || g_active) return;
                 auto* book = RE::BookMenu::GetTargetForm();
                 auto* movie = BookMovie();
-                if (!book || book->GetFormID() != g_beginOnOpen || !movie) return;
+                if (!book || book->GetFormID() != waiting || !movie) return;
                 RE::GFxValue ready;
                 if (movie->Invoke("_root.BookMenu_mc.EditReady", &ready, nullptr, 0) && ready.IsBool() && ready.GetBool()) {
-                    g_beginOnOpen = 0;
-                    SKSE::GetTaskInterface()->AddUITask([]() { Start(); });
+                    if (std::exchange(g_beginOnOpen, 0)) {
+                        SKSE::GetTaskInterface()->AddUITask([]() { Start(); });
+                    } else {
+                        g_blankOnOpen = 0;
+                        SKSE::GetTaskInterface()->AddUITask([]() { OpenBlank(); });
+                    }
                 }
             }
             static inline REL::Relocation<decltype(thunk)> func;
@@ -708,6 +813,24 @@ namespace InkAndQuill::Editor {
 
     void AddOwner(Owner owner) { g_owners.push_back(std::move(owner)); }
 
+    void RegisterBlank(RE::FormID blank, Owner onOpen)
+    {
+        if (blank != 0 && onOpen) g_blanks[blank] = std::move(onOpen);
+    }
+
+    bool ReplaceOpenBlank(RE::FormID bookId, const std::string& readingText)
+    {
+        auto* blank = RE::BookMenu::GetTargetForm();
+        auto* movie = BookMovie();
+        if (g_active || !movie || !IsOwnBlank(blank) || !SwapBlank(blank->GetFormID(), bookId)) return false;
+        // A session begun from here on is the book's, not the blank's.
+        g_openingBlank = 0;
+        RE::GFxValue text;
+        text.SetString(readingText.c_str());
+        movie->Invoke("_root.BookMenu_mc.ReplaceBookText", nullptr, &text, 1);
+        return true;
+    }
+
     namespace {
         // A new session may take over: writing is on and nothing else is writing or asking.  If not, its onEnd.
         bool CanBegin(Session& session)
@@ -726,6 +849,7 @@ namespace InkAndQuill::Editor {
     {
         if (!CanBegin(session)) return false;
         g_session = std::move(session);
+        g_sessionBlank = g_openingBlank;
         Start();
         return true;
     }
@@ -823,6 +947,7 @@ namespace InkAndQuill::Editor {
         g_active = false;
         g_prompting = false;
         g_beginOnOpen = 0;
+        g_blankOnOpen = 0;
         g_blood = false;
         EndSession();
     }

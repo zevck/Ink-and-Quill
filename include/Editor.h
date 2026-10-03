@@ -55,6 +55,7 @@ namespace InkAndQuill::Editor {
         bool accepted = false;
         std::string message;
         std::string text;
+        RE::FormID book = 0;  // a blank's session: the book that replaces the blank (0: the blank stays)
     };
 
     struct Client {
@@ -81,6 +82,14 @@ namespace InkAndQuill::Editor {
     // The edit key in an open book asks each owner in turn; one that owns the book calls Begin and returns true.
     using Owner = std::function<bool(RE::TESObjectBOOK* book)>;
     void AddOwner(Owner owner);
+
+    // A blank (docs/EDITOR.md#blanks): read from the player's inventory, or the edit key on it there, calls onOpen.
+    // The client replaces it now (ReplaceOpenBlank), or calls Begin and answers the first save with Saved::book.
+    void RegisterBlank(RE::FormID blank, Owner onOpen);
+
+    // A blank open from the inventory, not being written in (in onOpen, typically): replace it now.  One blank goes,
+    // the menu shows the book with readingText from its first page.  False: no blank open, or no such book.
+    bool ReplaceOpenBlank(RE::FormID book, const std::string& readingText);
 
     // The open book: check the quill and ink (or offer blood), then edit mode.  Book menu open.  False: not started
     // now (writing off, already writing, a prompt open); the session's onEnd has run.

@@ -2,7 +2,7 @@
 
 How a client mod uses Ink & Quill's editor. Header: `include/InkAndQuillAPI.h` (plain C; copy it into the client). Code: `src/API.cpp`, over `Editor` and `WritingTools`. The design and its reasons are in [API_DESIGN.md](API_DESIGN.md); the editor's behaviour in [EDITOR.md](EDITOR.md).
 
-**Status:** version 1, built 2026-10-02, no client uses it yet. Blanks and Papyrus aren't in it.
+**Status:** version 1, built 2026-10-02, no client uses it yet. Papyrus isn't in it.
 
 ## Getting it
 
@@ -41,11 +41,21 @@ What a session edits: the book's text as the client renders it for reading, with
 - **Changing the structure** (a new entry, a tear-out): `CurrentRuns(visit, user)` gives the runs as the player has them, unsaved text included; the client renders its text again from those and its change, then `Reload(markedText, from, count, caretRun, caretOffset)`. `from[i]` is the run that new run `i` was before (-1 for a new one), `count` the number of new runs: each run keeps the text it was last saved with, so unsaved changes still prompt on close. The caret goes to `caretRun` at `caretOffset` (-1: its end).
 - **The remove key** (Ink & Quill's, default F10) on a run: `removePrompt(user, run, reply)`; answer with `ReplyText` (the question) or not at all (nothing to remove there). On **Tear out**: `onRemove(user, run)`, and the client removes it with `CurrentRuns` and `Reload`.
 
+## Blanks
+
+`RegisterBlank(blankFormId, onOpen, user)` at `kDataLoaded` or later: an item the client writes into for the first time (a blank journal, parchment).
+
+- Reading it from the player's **own inventory** (not in the world, a container, a shop or the gift menu), or the edit key on it there, calls `onOpen(user, blankFormId)` once the menu has its text, with or without a quill.
+- **The client chooses when the blank becomes its book:**
+  - **Now:** `ReplaceBlank(bookFormId, readingText)` in `onOpen` removes one blank and shows the book from its first page; a session begun after it (or none) is that book's.
+  - **On the first save:** `BeginSession` in the blank, then answer the first accepted save with `ReplySaveAsBook(reply, bookFormId, readingText)`: Ink & Quill charges the costs, removes one blank and shows `bookFormId` in the open menu. Without a quill such a session ends with a HUD notice, not a message box. The save ends the session; writing in that book again is an ordinary session (its owner's). `ReplySave` (no book) leaves the blank.
+- Discard or putting the quill down: nothing is made, the blank stays.
+
 ## Saving
 
 `onSave(user, runs, count, reply)` on the edit key or the close prompt's Save, when any run changed. Answer with `ReplySave(reply, accepted, message, readingText)`:
 
-- **Accepted:** one use of ink or the blood cost is taken; the edit key returns to reading with `readingText` (the book's text as the client now renders it; `NULL` or empty closes the book), the prompt's Save closes the book.
+- **Accepted:** one use of ink or the blood cost is taken; the edit key returns to reading with `readingText` (the book's text as the client now renders it; `NULL` or empty closes the book), the prompt's Save closes the book. With nothing changed there's no save at all, and the edit key returns to reading with the book's current text.
 - **Refused:** `message` is shown (if any); writing goes on and nothing is charged. No answer counts as a refusal (logged).
 
 `onDiscard` is the close prompt's Discard. Neither ends the session by itself; `onEnd` follows when the book closes.

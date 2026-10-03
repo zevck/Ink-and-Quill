@@ -4,7 +4,7 @@ The player writes in the open book in the book menu. Code: `Editor`, `WritingMod
 
 ## Writing mode
 
-Writing is on when **Ink & Quill's `book.swf` is the one the game loads**. `WritingMode::Detect` runs at `kDataLoaded`:
+Writing is on when **Ink & Quill's `book.swf` is the one the game loads**. `WritingMode::Detect` runs at `kPostLoad`, so `IsWritingOn` is right for clients by their `kDataLoaded`:
 
 - It reads `Data\Interface\book.swf`, the file the game sees (under MO2, the winning loose file; a loose file beats every BSA). No file: off.
 - The SWF ships **uncompressed** (`FWS`; the build runs `ffdec-cli -decompress` and fails if the output isn't uncompressed with the marker, see [DEVELOPMENT.md](DEVELOPMENT.md)), so `BookMenu.as`'s marker `BOOKMENU_WRITING_INTERFACE=<n>` is plain text in the file. A compressed file or one without the marker is another mod's: off.
@@ -60,7 +60,7 @@ The design is in [API_DESIGN.md](API_DESIGN.md#marked-text-agreed-2026-10-02): t
 - **`SetEditMarked(text, font, size)`**, then `EnterEditMode`. `EditBuildMarked` sets the text as `SetBookText` does (wrapped in the page's font size, the reference field's format as default) through `SetText(…, true)`, notes where every lock and blood marker is, takes them out, and makes one segment per lock with the run after it as its body. Runs follow the rule in the design (empty ones count; text before the first or after the last lock only if there is any).
 - **Pages:** `EditLayout` breaks at `[pagebreak]` lines as `CalculatePagination` does (the page above ends at the tag's line, the next starts below it; the tag line is on neither, `aEditPageBottoms`), instead of at each segment.
 - **Locked `[pagebreak]`s are blanked:** replaced by as many spaces in the tag's own format, their places kept per segment (`breaks`). Reading cuts each page out of the text, so the tag is never drawn; the editor masks one tall field, and the window starts above a page's first line (the text gutter, and glyphs that rise above their line), so the tag's letters showed at the top of the next page (found in game). Spaces keep the line's height, so the pages don't move. `EditCheckLayout` compares the texts with tags and spaces made alike.
-- **Typing** takes the format of the character before the caret (after it at a run's start; the hint in an empty run). With the hint (`font`, `size`), `FormatBreaks` also gives each edited run that font and size and its `\r\r` the page's outer size, as Physical Diaries' renderer does. Blood ranges are painted with or without it.
+- **Typing** takes the format of the character before the caret (after it at a run's start; the hint in an empty run). With the hint (`font`, `size`), `FormatBreaks` also gives each edited run that font and size and its `\r\r` the page's outer size, as Physical Diaries' renderer does. Blood ranges are painted when the text loads (the client marks blood instead of colouring it; until 2026-10-02 old blood showed black until its run was edited) and after every edit, with or without the hint.
 - **Saving:** the runs as loaded (`EditGetBodies` right after `EnterEditMode`) are what a save compares against.
 - **Reloading** (`Editor::Reload`, the SWF's `EditReload`): the client's text rendered again rebuilds the field (`EditBuildMarked`) in place, the caret goes to the run and offset asked, and each new run takes the saved text of the run it came from (`from`), so unsaved changes still count. The remove key in marked text only asks (`removePrompt`) and hands the run to the client (`onRemove`), which reloads. `caretRun` on a session puts the caret at a run's end on entering (`EditFocusEntry`).
 - **Session end:** `EndSession` drops the session and calls the client's `onEnd`, once, on every way out (closed, discarded, no quill, blood declined, the menu closed before a `BeginOnOpen` began, a load).
@@ -78,6 +78,16 @@ Passed on AE (2026-10-02) on a Physical Diaries journal, after two fixes found b
 
 Physical Diaries' own edit key (F3) also acts on its journals, so the dev INI moves Ink & Quill's to F4 (`[Keys] Edit = 62`).
 
+## Blanks
+
+An item the client writes into for the first time: Physical Diaries' blank journals, Physical Letters' parchment. `Editor::RegisterBlank(form, onOpen)` (the C API's `RegisterBlank`).
+
+- **Opening:** the book menu opening on a registered blank queues `NoteBlank`. Only from the player's **own inventory**: not in the world (`BookMenu::GetTargetReference`), a container, a shop or the gift menu, and only if they carry one; anywhere else a blank is just an empty book. With the game not paused, the `NeedsPause` notice. Once the SWF has the text (`AdvanceMovie`, `EditReady`), `OpenBlank` calls the client's `onOpen`, which begins a session with its starting text as an owner would. The edit key on a blank in the inventory does the same (the player put the quill down and changed their mind).
+- **When it becomes the client's book is the client's choice.** In `onOpen` it can replace the blank **now** (`ReplaceOpenBlank`, the C API's `ReplaceBlank`: one blank goes, the menu is pointed at its book and shows the book's text via the SWF's `ReplaceBookText`), and then begin a session in that book or not; or it begins a session in the blank and replaces it **on the first save** (below). `onOpen` is called with or without a quill.
+- **No quill,** in a session begun in a blank: a HUD notice (`NeedsQuill`), not the message box: blanks get read often. No ink still offers blood.
+- **The first accepted save** answered with a book (`Saved::book`, the C API's `ReplySaveAsBook`): the costs are charged, one blank leaves the inventory, and the open menu is pointed at the client's book (`SetBookMenuBook`: the engine's book-menu globals for the base form and the item's extra list; from Physical Diaries, the VR address inferred there and never run). A save ends the session (the edit key reads again, the prompt's Save closes the book), so writing in that book again is an ordinary session of its owner. A save answered without a book leaves the blank (logged).
+- **Discard, or putting the quill down,** in a session begun in a blank: nothing is made and the blank stays.
+
 ## Input
 
 The input sink is **prepended** to `BSInputDeviceManager`, ahead of the menu. While writing, every keyboard event's user event is blanked (no key acts as a control) and calls `EditSuppressTurn` (the menu turns pages by key code). Keys become text with the active layout (`ToUnicode`, dead keys, held-key repeat). Arrows, Home and End move the caret; Backspace, Delete and Enter edit (an erase only where `EditCanErase` says there's something). The edit key saves and reads again; the remove key asks to tear out the entry under the caret. While a prompt is open, keys are its own. Other sinks still see the key codes, so a client's own key (a new-entry key) can call `Editor::AppendEntry`.
@@ -90,6 +100,7 @@ The **edit key** while writing (save, then read again), or **Save** on the close
 2. In blood, `CanBleed`; in ink, `HasInk` (only health can change while the menu pauses).
 3. The client's `onSave(bodies)` answers **accepted** or **refused with a message** (shown; writing goes on; nothing charged).
 4. Accepted: one use of ink (`InkRanDry` if that was the last) or blood is taken. The edit key returns to reading with the client's `text` (`ReturnToReading`); with no text the book closes.
+5. Nothing changed: no save and no client call; the edit key returns to reading with the text the book already had (the SWF keeps the last `SetBookText` text, `sBookText`). Until 2026-10-02 this closed the book (found in game with Physical Diaries).
 
 The editor's text can't be read: `SaveFailed`, and writing goes on, so nothing is lost while the player can still see it.
 
@@ -107,7 +118,7 @@ The remove key, if the client set `removePrompt`: the client's question, **Tear 
 
 ## Not done yet
 
-- **The API**: version 1 is built ([API.md](API.md)) and untested; blanks and Papyrus aren't. Physical Diaries and Physical Letters don't use Ink & Quill yet.
+- **The API**: version 1 is built ([API.md](API.md)); Physical Diaries uses its sessions (AE), blanks are untested; Papyrus isn't built. Physical Diaries and Physical Letters don't use Ink & Quill yet.
 - **Nothing here has run in game.** Above all the renamed inkwells: the hand-made extra list on SE and AE, the name surviving save and load, dropping, containers and merchants, and SkyUI showing it.
 - **Translations** beyond English, and an MCM for the keys.
 - **Both mods ship `book.swf`** until Physical Diaries drops its copy; MO2's order picks one, and either works (same marker).

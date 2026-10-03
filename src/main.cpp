@@ -32,10 +32,13 @@ namespace {
     {
         if (!msg) return;
         switch (msg->type) {
+        case SKSE::MessagingInterface::kPostLoad:
+            // Before any client's kDataLoaded, which may come first: IsWritingOn is right from then on.
+            InkAndQuill::WritingMode::Detect();
+            break;
         case SKSE::MessagingInterface::kDataLoaded:
             InkAndQuill::Settings::Load();
             InkAndQuill::Strings::Load();
-            InkAndQuill::WritingMode::Detect();
             InkAndQuill::WritingTools::OnDataLoaded();
             if (InkAndQuill::WritingMode::IsOn()) {
                 InkAndQuill::Editor::Register();

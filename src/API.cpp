@@ -141,7 +141,7 @@ namespace {
     void ReplySave(IQ_SaveReply* reply, bool accepted, const char* message, const char* readingText)
     {
         if (!reply) return;
-        reply->saved = { accepted, Copy(message), Copy(readingText) };
+        reply->saved = { accepted, Copy(message), Copy(readingText), 0 };
         reply->answered = true;
     }
 
@@ -165,6 +165,22 @@ namespace {
         }
     }
 
+    bool RegisterBlank(std::uint32_t blank, IQ_Owner onOpen, void* user)
+    {
+        if (!onOpen || blank == 0) return false;
+        Editor::RegisterBlank(blank, [onOpen, user](RE::TESObjectBOOK* book) { return onOpen(user, book->GetFormID()); });
+        return true;
+    }
+
+    void ReplySaveAsBook(IQ_SaveReply* reply, std::uint32_t book, const char* readingText)
+    {
+        if (!reply) return;
+        reply->saved = { true, std::string(), Copy(readingText), book };
+        reply->answered = true;
+    }
+
+    bool ReplaceBlank(std::uint32_t book, const char* readingText) { return Editor::ReplaceOpenBlank(book, Copy(readingText)); }
+
     bool CanBleed() { return WritingTools::CanBleed(); }
     bool Bleed() { return WritingTools::Bleed(); }
 
@@ -186,6 +202,9 @@ namespace {
         .UseInk = UseInk,
         .CanBleed = CanBleed,
         .Bleed = Bleed,
+        .RegisterBlank = RegisterBlank,
+        .ReplySaveAsBook = ReplySaveAsBook,
+        .ReplaceBlank = ReplaceBlank,
     };
 }
 

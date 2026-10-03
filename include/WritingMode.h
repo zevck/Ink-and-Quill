@@ -23,7 +23,7 @@
 // See docs/EDITOR.md#writing-mode.
 namespace InkAndQuill::WritingMode {
 
-    // kDataLoaded, before Editor::Register.
+    // kPostLoad: before any client asks (their kDataLoaded may come before ours).
     void Detect();
 
     // A book.swf with writing is installed, at this plugin's interface version or newer.

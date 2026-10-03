@@ -121,6 +121,17 @@ typedef struct IQ_API
     IQ_Ink (*UseInk)(void);
     bool (*CanBleed)(void);
     bool (*Bleed)(void);
+
+    /* Blanks: reading blankFormId from the player's own inventory (or the edit key on it there) calls onOpen.
+       The client chooses when it becomes its book: now (ReplaceBlank, then BeginSession or not), or on the first
+       save (BeginSession, then ReplySaveAsBook).  Add at kDataLoaded or later. */
+    bool (*RegisterBlank)(uint32_t blankFormId, IQ_Owner onOpen, void* user);
+    /* A blank's save, accepted: the client's new book replaces it (one blank is removed, the open menu shows
+       bookFormId from now on).  readingText as ReplySave's. */
+    void (*ReplySaveAsBook)(IQ_SaveReply* reply, uint32_t bookFormId, const char* readingText);
+    /* A blank open from the inventory and not being written in (in onOpen, typically): replace it now with
+       bookFormId, shown from its first page with readingText.  A session begun after it is that book's. */
+    bool (*ReplaceBlank)(uint32_t bookFormId, const char* readingText);
 } IQ_API;
 
 /* Exported by InkAndQuill.dll as "IQ_GetAPI". */
