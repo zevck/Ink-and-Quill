@@ -13,7 +13,7 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 | `Writing.InkwellUses` | 10 | 1–100 | Saves a full inkwell lasts |
 | `Writing.Blood` | 1 | 0–1 | With a quill but no ink, offer to write in blood. 0: the `NeedsInk` notice instead (a HUD notice on a blank) |
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
-| `Debug.LayoutTest` | 0 | 0–1 | Development only, not in the MCM ([EDITOR.md](EDITOR.md#the-layout-test)) |
+| `Debug.QuillAdjust` | 0 | 0–1 | Development only, not in the MCM: shows the quill cursor (deferred past 1.0) and lets the numpad move it ([EDITOR.md](EDITOR.md#quill-cursor)) |
 
 The key is a DirectX scan code, not one that types (while writing it couldn't also type). The MCM refuses, with a message, a code that isn't a keyboard key (SkyUI also offers mouse and gamepad buttons, 256 and up) or a key that types or edits (`GetKeyProblem`, i.e. `Keys::Check`, also used for clients' keys: Escape, Backspace, Enter, Delete, the arrows, Home, End, the modifiers, and anything that gives a character with the player's layout). It doesn't check conflicts: it only acts while a book is open, where game controls don't apply. Clients' own keys (Physical Diaries' new entry and tear-out) are theirs, in their own settings.
 

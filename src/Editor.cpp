@@ -19,10 +19,13 @@
 
 #include "Editor.h"
 
+#include "BookMovie.h"
 #include "Clipboard.h"
 #include "Keys.h"
+#include "QuillCursor.h"
 #include "Settings.h"
 #include "Strings.h"
+#include "Suggestions.h"
 #include "WritingMode.h"
 #include "WritingTools.h"
 
@@ -91,23 +94,8 @@ namespace InkAndQuill::Editor {
 
         void Notify(const std::string& text) { RE::SendHUDMessage::ShowHUDMessage(text.c_str()); }
 
-        // book.swf is its own movie, separate from bookmenu.swf.
-        RE::GFxMovieView* BookMovie()
-        {
-            auto* ui = RE::UI::GetSingleton();
-            auto bookMenu = ui ? ui->GetMenu<RE::BookMenu>() : nullptr;
-            return bookMenu ? bookMenu->GetRuntimeData().book.get() : nullptr;
-        }
-
-        void Invoke(const char* function, const char* argument = nullptr)
-        {
-            auto* movie = BookMovie();
-            if (!movie) return;
-            RE::GFxValue arg;
-            if (argument) arg.SetString(argument);
-            movie->Invoke(std::format("_root.BookMenu_mc.{}", function).c_str(), nullptr, argument ? &arg : nullptr,
-                          argument ? 1 : 0);
-        }
+        RE::GFxMovieView* BookMovie() { return Book::Movie(); }
+        void Invoke(const char* function, const char* argument = nullptr) { Book::Call(function, nullptr, argument); }
 
         // Keys reach the menu blanked (InputSink), so no controls need turning off; the mouse
         // keeps the book's own page turns (left click previous, right click next).
@@ -128,6 +116,7 @@ namespace InkAndQuill::Editor {
             data->cancelButtonIndex = cancelButton;  // Escape on the prompt
             data->callback = RE::BSTSmartPointer<RE::IMessageBoxCallback>(callback);
             // The prompt's own keys (Enter, Escape) must reach it.
+            Suggestions::Clear();
             g_prompting = true;
             SetTextInput(false);
             RE::MessageBoxMenu::QueueMessage(data);
@@ -344,9 +333,7 @@ namespace InkAndQuill::Editor {
                 return;
             }
             for (const auto& body : *bodies) g_edit.push_back({ body });
-            RE::GFxValue check;
-            movie->Invoke("_root.BookMenu_mc.EditCheckLayout", &check, nullptr, 0);
-            SKSE::log::info("[Editor] {} runs; layout {}", g_edit.size(), check.IsString() ? check.GetString() : "unchecked");
+            SKSE::log::info("[Editor] {} runs", g_edit.size());
             g_active = true;
             if (g_blood) {
                 RE::GFxValue on;
@@ -355,6 +342,7 @@ namespace InkAndQuill::Editor {
                 SKSE::log::info("[Editor] Writing in blood");
             }
             SetTextInput(true);
+            QuillCursor::Show();
             SKSE::log::info("[Editor] Edit mode on");
             if (g_session.caretRun >= 0) {
                 RE::GFxValue run;
@@ -366,6 +354,7 @@ namespace InkAndQuill::Editor {
         void LeaveEditMode()
         {
             if (!g_active.exchange(false)) return;
+            QuillCursor::Hide();
             g_prompting = false;
             SetTextInput(false);
             SKSE::log::info("[Editor] Edit mode off");
@@ -455,6 +444,17 @@ namespace InkAndQuill::Editor {
             RE::GFxValue can;
             return BookMovie()->Invoke("_root.BookMenu_mc.EditCanErase", &can, &forward, 1) && can.IsBool() &&
                    can.GetBool();
+        }
+
+        // A key changed a run's text: the client hears it now, in the key's task, so a Reload shows with it.
+        void Changed()
+        {
+            if (!g_active || g_prompting || !g_session.client.onChange) return;
+            const auto run = CaretEntry();
+            RE::GFxValue offset;
+            if (!run || !Book::Call("EditCaretOffset", &offset) || !offset.IsNumber()) return;
+            const auto onChange = g_session.client.onChange;  // a copy: the session may end in it
+            onChange(static_cast<int>(*run), static_cast<int>(offset.GetNumber()));
         }
 
         // Save / Discard / Keep writing.
@@ -581,6 +581,7 @@ namespace InkAndQuill::Editor {
             static void thunk(RE::IMenu* a_menu, float a_interval, std::uint32_t a_currentTime)
             {
                 func(a_menu, a_interval, a_currentTime);
+                QuillCursor::Follow();
                 const RE::FormID waiting = g_beginOnOpen ? g_beginOnOpen : g_blankOnOpen;
                 if (waiting == 0 || g_active) return;
                 auto* book = RE::BookMenu::GetTargetForm();
@@ -601,6 +602,14 @@ namespace InkAndQuill::Editor {
 
         void HandleKey(std::uint32_t scanCode)
         {
+            if (QuillCursor::Adjust(scanCode)) return;
+            if (std::string accepted; Suggestions::HandleKey(scanCode, accepted)) {
+                if (!accepted.empty() && CanWrite()) {
+                    Invoke("AppendEditChar", accepted.c_str());
+                    Changed();
+                }
+                return;
+            }
             if (scanCode == kEscape) {
                 // One press closes the book (text input would swallow it); the close hook
                 // asks first if there are unsaved changes.
@@ -614,16 +623,19 @@ namespace InkAndQuill::Editor {
                 Invoke("EditMoveCursor", key->second);
                 return;
             }
-            if (scanCode == kBackspace) {
-                if (CanWrite(Change::EraseBack)) Invoke("EditBackspace");
-                return;
-            }
-            if (scanCode == kDelete) {
-                if (CanWrite(Change::EraseForward)) Invoke("EditDelete");
+            if (scanCode == kBackspace || scanCode == kDelete) {
+                const bool back = scanCode == kBackspace;
+                if (CanWrite(back ? Change::EraseBack : Change::EraseForward)) {
+                    Invoke(back ? "EditBackspace" : "EditDelete");
+                    Changed();
+                }
                 return;
             }
             if (scanCode == kEnter) {
-                if (CanWrite()) Invoke("AppendEditChar", "\n");
+                if (CanWrite()) {
+                    Invoke("AppendEditChar", "\n");
+                    Changed();
+                }
                 return;
             }
 
@@ -636,7 +648,10 @@ namespace InkAndQuill::Editor {
             // Ctrl (not AltGr, which some layouts type with): Ctrl+V pastes, Ctrl+C copies the run the caret is in.
             if ((keyState[VK_CONTROL] & 0x80) && !(keyState[VK_MENU] & 0x80)) {
                 if (vk == 'V' && CanWrite()) {
-                    if (const auto text = Clipboard::ReadForTyping(); !text.empty()) Invoke("AppendEditChar", text.c_str());
+                    if (const auto text = Clipboard::ReadForTyping(); !text.empty()) {
+                        Invoke("AppendEditChar", text.c_str());
+                        Changed();
+                    }
                 } else if (vk == 'C') {
                     const auto run = CaretEntry();
                     const auto bodies = run ? ReadBodies() : std::nullopt;
@@ -650,7 +665,10 @@ namespace InkAndQuill::Editor {
                 if (chars[i] >= 32) typed += chars[i];
             }
             if (typed.empty()) return;
-            if (CanWrite()) Invoke("AppendEditChar", Strings::Utf8(typed).c_str());
+            if (CanWrite()) {
+                Invoke("AppendEditChar", Strings::Utf8(typed).c_str());
+                Changed();
+            }
         }
 
         // Every way of closing the book reaches the menu here: with unsaved changes it's held back
@@ -919,6 +937,8 @@ namespace InkAndQuill::Editor {
 
     bool IsWriting() { return g_active; }
 
+    bool IsPrompting() { return g_prompting; }
+
     bool InBlood() { return g_active && g_blood; }
 
     bool WouldBeInBlood()
@@ -942,6 +962,7 @@ namespace InkAndQuill::Editor {
 
     void Reset()
     {
+        QuillCursor::Hide();
         g_active = false;
         g_prompting = false;
         g_beginOnOpen = 0;

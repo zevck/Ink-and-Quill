@@ -36,9 +36,9 @@ The editor puts no limits on which pages or text can be edited: **everything is 
 - **Changing the structure** (a new entry, a tear-out, new dates) is the client rendering again with its session's pieces, and the editor reloading with the caret kept in its run. Clients must render from their session state (not from storage that hasn't caught up) and keep the session's order until the save.
 - **Typed text** takes the format of the text it's typed into. A client whose renderer formats paragraph breaks apart from the text (Physical Diaries sizes them outside its font tags) passes a font and size hint; without it a newly typed paragraph can sit a few pixels off until the save re-renders it.
 - **Client rules** from the review: strip U+E002 and U+E003 out of stored text before rendering (as U+E000 and U+E001 are), or one in an entry breaks the run count; never send marked text through a reading-only conversion (Physical Diaries' Win-1251 step mangles 3-byte characters); render twice (reading, marked) rather than stripping markers from one string, since blood renders differently (colour tags for reading, markers for editing). Sanitizing what the player writes is the client's choice; the editor compares runs against what it loaded, so a client's cleanup doesn't make an untouched run look changed.
-- **No fields beyond runs.** A letter's recipient is the client's: a "To:" label locked before an ordinary run, the name matched by the client when the letter is saved (refused with a message if there's no single match). Ink & Quill has no suggestions or required fields (decided 2026-10-02).
+- **No fields beyond runs.** A letter's recipient is the client's: a "To:" label locked before an ordinary run, the name matched by the client when the letter is saved (refused with a message if there's no single match). Ink & Quill has no required fields (decided 2026-10-02); a client can offer inline completion (`Suggest`, [API.md](API.md#suggestions), 2026-10-03).
 
-Tested in game (AE, 2026-10-02, the layout test, [EDITOR.md](EDITOR.md#the-layout-test)) on a Physical Diaries journal: the pages match reading, locked text stays locked, typing keeps the fonts, ink and blood colours. Open: Cyrillic in the edit field (UTF-8 or Win-1251 through Invoke); SE.
+Tested in game (AE, 2026-10-02) on a Physical Diaries journal: the pages match reading, locked text stays locked, typing keeps the fonts, ink and blood colours. Open: Cyrillic in the edit field (UTF-8 or Win-1251 through Invoke); SE.
 
 ## Costs
 
@@ -128,5 +128,7 @@ The materials calls are public so a client with its own UI can still share the i
 - The edit key does nothing on a book no client owns.
 - VR isn't a target: the editor needs a keyboard; it may work there, untested and unsupported.
 - Layout belongs to the client: marked text, everything editable unless locked (2026-10-02; [Marked text](#marked-text-agreed-2026-10-02)).
-- No "To:" field or suggestions: a letter's recipient is the client's to resolve (2026-10-02).
+- No "To:" field: a letter's recipient is the client's to resolve (2026-10-02). Suggestions came later (`Suggest`, below).
 - No tear-out or remove key: a client's own actions and keys are its own (2026-10-02). Ink & Quill only shows a client's question (`Prompt`), tells it the caret's run (`CaretRun`) and lets its keys through (`RegisterKeys`) (2026-10-03).
+- Inline completion (`Suggest`): the client gives candidates, Ink & Quill shows them one at a time after the caret and owns the keys (Tab / Shift+Tab cycle, Right accepts, Escape dismisses) (2026-10-03). Clients still take no keys.
+- `onChange`: clients react to typing without polling (Physical Letters' recipient preview), with the caret's offset so a `Reload` keeps the caret (2026-10-03). No key interception for clients.

@@ -23,6 +23,7 @@
 
 #include "Clients.h"
 #include "Editor.h"
+#include "Suggestions.h"
 #include "WritingMode.h"
 #include "WritingTools.h"
 
@@ -67,6 +68,7 @@ namespace {
         };
         if (c.onDiscard) client.onDiscard = [c]() { c.onDiscard(c.user); };
         if (c.onEnd) client.onEnd = [c]() { c.onEnd(c.user); };
+        if (c.onChange) client.onChange = [c](int run, int offset) { c.onChange(c.user, run, offset); };
         return session;
     }
 
@@ -195,6 +197,20 @@ namespace {
 
     void SetClientName(const char* name) { Clients::Name(_ReturnAddress(), Copy(name)); }
 
+    bool Suggest(const char* const* completions, std::int32_t count)
+    {
+        try {
+            if (!Editor::IsWriting() || Editor::IsPrompting()) return false;
+            std::vector<std::string> list;
+            for (std::int32_t i = 0; completions && i < count; ++i) list.push_back(Copy(completions[i]));
+            Suggestions::Show(list);
+            return true;
+        } catch (const std::exception& e) {
+            SKSE::log::error("[API] Suggest: {}", e.what());
+            return false;
+        }
+    }
+
     bool CanBleed() { return WritingTools::CanBleed(); }
     bool Bleed() { return WritingTools::Bleed(); }
 
@@ -223,6 +239,7 @@ namespace {
         .RegisterKeys = RegisterKeys,
         .CaretRun = CaretRun,
         .Prompt = Prompt,
+        .Suggest = Suggest,
     };
 }
 

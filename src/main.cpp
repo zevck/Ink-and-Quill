@@ -18,7 +18,6 @@
  */
 
 #include "Editor.h"
-#include "LayoutTest.h"
 #include "Papyrus.h"
 #include "Settings.h"
 #include "Strings.h"
@@ -43,7 +42,6 @@ namespace {
             InkAndQuill::WritingTools::OnDataLoaded();
             if (InkAndQuill::WritingMode::IsOn()) {
                 InkAndQuill::Editor::Register();
-                InkAndQuill::LayoutTest::Register();
             }
             break;
         case SKSE::MessagingInterface::kPreLoadGame:

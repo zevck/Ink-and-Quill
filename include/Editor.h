@@ -52,6 +52,8 @@ namespace InkAndQuill::Editor {
         std::function<void()> onDiscard;
         // The session is over (saved and closed, discarded, refused to start, a load): once, always last.
         std::function<void()> onEnd;
+        // The player changed a run's text: its index and the caret's offset in it (docs/API.md#reacting-to-typing).
+        std::function<void(int run, int caretOffset)> onChange;
     };
 
     struct Session {
@@ -92,6 +94,7 @@ namespace InkAndQuill::Editor {
 
     // The player is writing, and in blood.
     bool IsWriting();
+    bool IsPrompting();  // a prompt is open over the book
     bool InBlood();
 
     // A session begun now would be in blood, unless the player declines (quill and ink required, blood on, no ink):

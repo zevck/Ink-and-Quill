@@ -22,7 +22,11 @@
 // The keys the editor uses (DirectX scan codes), and which keys may be the edit key or a client's key.
 namespace InkAndQuill::Keys {
 
-    inline constexpr std::uint32_t kEscape = 0x01, kBackspace = 0x0E, kEnter = 0x1C, kKeypadEnter = 0x9C, kDelete = 0xD3;
+    inline constexpr std::uint32_t kEscape = 0x01, kBackspace = 0x0E, kEnter = 0x1C, kKeypadEnter = 0x9C, kDelete = 0xD3, kTab = 0x0F;
+    inline constexpr std::uint32_t kNumpad0 = 0x52, kNumpad1 = 0x4F, kNumpad2 = 0x50, kNumpad3 = 0x51, kNumpad4 = 0x4B,
+                                   kNumpad5 = 0x4C, kNumpad6 = 0x4D, kNumpad7 = 0x47, kNumpad8 = 0x48, kNumpad9 = 0x49;
+    inline constexpr std::uint32_t kNumpadPlus = 0x4E, kNumpadMinus = 0x4A, kNumpadStar = 0x37, kNumpadSlash = 0xB5,
+                                   kNumpadDot = 0x53;
     inline constexpr std::uint32_t kLeft = 0xCB, kRight = 0xCD, kUp = 0xC8, kDown = 0xD0, kHome = 0xC7, kEnd = 0xCF;
     // Modifiers only change other keys: Shift, Ctrl, Alt (left and right), Caps Lock.
     inline constexpr std::uint32_t kModifiers[] = { 0x2A, 0x36, 0x1D, 0x9D, 0x38, 0xB8, 0x3A };

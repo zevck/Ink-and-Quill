@@ -35,6 +35,7 @@ class BookMenu extends MovieClip
    static var CACHED_PAGES = 4;
    static var EDIT_FIELD_HEIGHT = 20000;   // ~40 note pages before the edit field would scroll
    static var EDIT_MASK_OVERHANG = 12;
+   static var SUGGEST_COLOR = 0x2A2520;   // a suggestion's faded ink (lighter is unreadable on the vanilla page)
    static var EDIT_KEY_TURN_BLOCK_MS = 200;
    //@variant convenient-reading
    // Convenient Reading's text sizes for books and notes, from its ini (its own code).
@@ -245,6 +246,7 @@ class BookMenu extends MovieClip
       {
          return -1;
       }
+      this.EditSuggestClear();
       // What reading shows if the edit key returns with nothing to save (a tear-out changes no run's text).
       if(readingText != undefined && readingText.length)
       {
@@ -440,65 +442,6 @@ class BookMenu extends MovieClip
          }
          k++;
       }
-   }
-
-   // Development check: the editor's page starts against the reading view's (the same text, so the same lines).
-   // "ok (...)" or what differs.
-   function EditCheckLayout()
-   {
-      if(this.aEditPageLines == undefined)
-      {
-         return "no pages";
-      }
-      if(this.iPaginationIndex != -1 || this.PageInfoA == undefined)
-      {
-         return "reading not paginated yet";
-      }
-      var rf = this.ReferenceTextField;
-      // The editor's [pagebreak]s are spaces.
-      var blank = "";
-      while(blank.length < BookMenu.PAGE_BREAK_TAG.length)
-      {
-         blank += " ";
-      }
-      var editing0 = this.EditField.text.split(BookMenu.PAGE_BREAK_TAG).join(blank);
-      if(rf.text.split(BookMenu.PAGE_BREAK_TAG).join(blank) != editing0)
-      {
-         if(editing0.indexOf("# ") >= 0)
-         {
-            return "headings in the text: the editor keeps their marks, so its offsets differ (not checked)";
-         }
-         return "texts differ: reading " + rf.text.length + " chars, editing " + this.EditField.length;
-      }
-      var reading = [];
-      var p = 0;
-      while(p < this.PageInfoA.length)
-      {
-         if(this.PageInfoA[p].pageTop != undefined)
-         {
-            reading.push(rf.getLineOffset(rf.getLineIndexAtPoint(0, this.PageInfoA[p].pageTop)));
-         }
-         p++;
-      }
-      var editing = [];
-      p = 0;
-      while(p < this.aEditPageLines.length)
-      {
-         editing.push(this.EditField.getLineOffset(this.aEditPageLines[p]));
-         p++;
-      }
-      var out = "";
-      p = 0;
-      while(p < Math.max(reading.length, editing.length))
-      {
-         if(reading[p] != editing[p])
-         {
-            out += " page " + p + ": reading " + reading[p] + ", editing " + editing[p] + ";";
-         }
-         p++;
-      }
-      var counts = "reading " + reading.length + " page starts, editing " + editing.length;
-      return out.length ? "differs (" + counts + "):" + out : "ok (" + counts + ")";
    }
 
    // 1 for a line starting "# ", 2 for "## ", else 0.
@@ -912,6 +855,18 @@ class BookMenu extends MovieClip
       return entry;
    }
 
+   // The caret's place in its run (characters from the run's start, as EditReload's caretOffset), or -1.
+   function EditCaretOffset()
+   {
+      if(this.aSegs == undefined || this.EditField == undefined)
+      {
+         return -1;
+      }
+      var pos = this.EditCaret();
+      var k = this.EditableSegAt(pos);
+      return k < 0 ? -1 : pos - this.BodyStart(k);
+   }
+
    // The caret at pos, or none at all when there is no entry to type in (pos -1): a caret on
    // the blank or title page would look editable.
    function EditSetCaretOrNone(pos)
@@ -1128,6 +1083,7 @@ class BookMenu extends MovieClip
    // Put the caret on page p (its first character) and show it.
    function EditGoToPage(p)
    {
+      this.EditSuggestClear();
       if(p < 0 || p >= this.EditPageCount())
       {
          return false;
@@ -1166,6 +1122,154 @@ class BookMenu extends MovieClip
       return p;
    }
 
+
+   // The quill cursor's point: "side,page,x,y,gx,gy". side: 0 the left page (or a note), 1 the right; x, y: the caret's
+   // left edge and its line's bottom, in the field's units from the top of its page; gx, gy: that point on the stage.
+   function EditCaretPoint()
+   {
+      var tf = this.EditField;
+      var pos = this.EditCaret();
+      var page = this.PageOfPos(pos);
+      var line = pos >= tf.length ? tf.numLines - 1 : tf.getLineIndexOfChar(pos);
+      var r = pos < tf.length ? tf.getCharBoundaries(pos) : undefined;
+      var x = 2;
+      if(r != undefined)
+      {
+         x = r.x;
+      }
+      else if(pos > 0 && pos != tf.getLineOffset(line))
+      {
+         var prev = tf.getCharBoundaries(pos - 1);
+         x = prev == undefined ? 2 : prev.x + prev.width;
+      }
+      var y = 2;
+      var i = this.aEditPageLines[page];
+      while(i <= line)
+      {
+         y += tf.getLineMetrics(i).height;
+         i++;
+      }
+      var side = this.bNote ? 0 : page - this.iEditPage;
+      // ShowEditPage puts a page's top at the clip's top (the field's _y = 2 - that top), so y is the clip's y.
+      var pt = {x:x + tf._x, y:y};
+      this.EditClip.localToGlobal(pt);
+      return side + "," + page + "," + x + "," + y + "," + pt.x + "," + pt.y;
+   }
+
+   // ---- Suggestions (inline completion, docs/EDITOR.md#suggestions) ----
+
+   // From the plugin (5): candidates for the text at the caret, separated by U+001F.
+   function EditSuggest(list)
+   {
+      this.EditSuggestClear();
+      if(this.EditField == undefined || list == undefined || !list.length)
+      {
+         return false;
+      }
+      this.aSuggest = list.split(String.fromCharCode(31));
+      this.iSuggest = 0;
+      this.iSuggestAt = this.EditCaret();
+      this.ShowSuggestion();
+      return true;
+   }
+
+   // A suggestion shows, for where the caret still is.
+   function EditSuggesting()
+   {
+      return this.aSuggest != undefined && this.EditField != undefined && this.EditCaret() == this.iSuggestAt;
+   }
+
+   function EditSuggestNext(step)
+   {
+      if(!this.EditSuggesting())
+      {
+         return undefined;
+      }
+      var n = this.aSuggest.length;
+      this.iSuggest = ((this.iSuggest + Number(step)) % n + n) % n;
+      this.ShowSuggestion();
+   }
+
+   // The suggestion shown, cleared: the plugin types it.  "" if none.
+   function EditSuggestTake()
+   {
+      var text = this.EditSuggesting() ? this.aSuggest[this.iSuggest] : "";
+      this.EditSuggestClear();
+      return text;
+   }
+
+   function EditSuggestClear()
+   {
+      this.aSuggest = undefined;
+      if(this.SuggestField != undefined)
+      {
+         this.SuggestField.removeTextField();
+         this.SuggestField = undefined;
+      }
+   }
+
+   // Its own field on the edit clip (under the same mask), at the caret, in the caret's font and size: never in
+   // the edited text, so runs, layout and the format typed text takes are untouched.
+   function ShowSuggestion()
+   {
+      var tf = this.EditField;
+      var pos = this.EditCaret();
+      var line = pos >= tf.length ? tf.numLines - 1 : tf.getLineIndexOfChar(pos);
+      var ch = pos < tf.length ? tf.text.charAt(pos) : "";
+      var r = ch.length && ch != "\r" && ch != "\n" ? tf.getCharBoundaries(pos) : undefined;
+      var x = 2;
+      if(r != undefined)
+      {
+         x = r.x;
+      }
+      else if(pos > 0 && pos != tf.getLineOffset(line))
+      {
+         var prev = tf.getCharBoundaries(pos - 1);
+         x = prev == undefined ? 2 : prev.x + prev.width;
+      }
+      var top = 2;
+      var i = 0;
+      while(i < line)
+      {
+         top += tf.getLineMetrics(i).height;
+         i++;
+      }
+      var fmt = pos > 0 ? tf.getTextFormat(pos - 1, pos) : tf.getNewTextFormat();
+      if(this.SuggestField == undefined)
+      {
+         this.EditClip.createTextField("SuggestField", this.EditClip.getNextHighestDepth(), 0, 0, 10, 10);
+         this.SuggestField = this.EditClip.SuggestField;
+         this.SuggestField.embedFonts = true;
+         this.SuggestField.selectable = false;
+         this.SuggestField.multiline = false;
+         this.SuggestField.wordWrap = false;
+         this.SuggestField.autoSize = "left";
+      }
+      var s = this.SuggestField;
+      var text = this.aSuggest[this.iSuggest];
+      var f = new TextFormat();
+      f.font = fmt.font;
+      f.size = fmt.size;
+      f.color = BookMenu.SUGGEST_COLOR;
+      f.kerning = fmt.kerning;
+      f.letterSpacing = fmt.letterSpacing;
+      // Cut to the field's right edge with "...".
+      var room = tf._width - x;
+      var shown = text;
+      while(true)
+      {
+         s.text = shown;
+         s.setTextFormat(f);
+         if(s.textWidth <= room || text.length <= 1)
+         {
+            break;
+         }
+         text = text.substr(0, text.length - 1);
+         shown = text + "...";
+      }
+      s._x = tf._x + x - 2;
+      s._y = tf._y + top - 2;
+   }
 
    function EditCaret()
    {
@@ -1331,6 +1435,7 @@ class BookMenu extends MovieClip
 
    function ExitEditMode()
    {
+      this.EditSuggestClear();
       if(this.EditClip != undefined)
       {
          this.EditClip.setMask(null);

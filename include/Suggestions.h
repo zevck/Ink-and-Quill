@@ -19,11 +19,17 @@
 
 #pragma once
 
-// Development only ([Debug] LayoutTest = 1): an owner for every book that edits its own reading text as
-// marked text, and logs the runs instead of keeping them.  See docs/EDITOR.md#the-layout-test.
-namespace InkAndQuill::LayoutTest {
+// Inline completion: a client's candidates for the text at the caret, shown one at a time, faded, after it
+// (book.swf draws them apart from the text).  See docs/EDITOR.md#suggestions.
+namespace InkAndQuill::Suggestions {
 
-    // kDataLoaded, after Editor::Register.
-    void Register();
+    // Shows completions at the caret (cleaned: one line, no markers); none clears them.  UI thread, while writing.
+    void Show(const std::vector<std::string>& completions);
+
+    void Clear();
+
+    // A key while writing: true if it was the suggestion's (Tab, Shift+Tab, Right, Escape).  Right fills
+    // accepted with the text to type.  Any other key clears the suggestion and returns false.
+    bool HandleKey(std::uint32_t scanCode, std::string& accepted);
 
 }

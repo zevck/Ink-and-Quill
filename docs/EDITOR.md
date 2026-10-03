@@ -1,6 +1,6 @@
 # The editor
 
-The player writes in the open book in the book menu. Code: `Editor`, `Keys` (the editor's keys, held-key repeat, which keys may be bound), `Clipboard` (paste and copy), `WritingMode`, `WritingTools`, `Settings`, `Strings`, and `book.swf` (`swf/book`). Copied from SkyrimNet Physical Diaries' `BookEditor` (its docs/EDITING.md has the history) and made client-neutral: diary journals, SkyrimNet writes and blank journals stay there. Clients reach it through the C API ([API.md](API.md)), built on the internal `Editor` calls.
+The player writes in the open book in the book menu. Code: `Editor`, `Keys` (the editor's keys, held-key repeat, which keys may be bound), `Clipboard` (paste and copy), `Suggestions` (inline completion), `QuillCursor`, `WritingMode`, `WritingTools`, `Settings`, `Strings`, and `book.swf` (`swf/book`). Copied from SkyrimNet Physical Diaries' `BookEditor` (its docs/EDITING.md has the history) and made client-neutral: diary journals, SkyrimNet writes and blank journals stay there. Clients reach it through the C API ([API.md](API.md)), built on the internal `Editor` calls.
 
 ## Writing mode
 
@@ -45,7 +45,7 @@ The design is in [API_DESIGN.md](API_DESIGN.md#marked-text-agreed-2026-10-02): t
 
 - **`SetEditMarked(text, font, size)`**, then `EnterEditMode`. `EditBuildMarked` sets the text as `SetBookText` does (wrapped in the page's font size, the reference field's format as default) through `SetText(…, true)`, notes where every lock and blood marker is, takes them out, and makes one segment per lock with the run after it as its body. Runs follow the rule in the design (empty ones count; text before the first or after the last lock only if there is any).
 - **Pages:** `EditLayout` breaks at `[pagebreak]` lines as `CalculatePagination` does (the page above ends at the tag's line, the next starts below it; the tag line is on neither, `aEditPageBottoms`), instead of at each segment.
-- **Locked `[pagebreak]`s are blanked:** replaced by as many spaces in the tag's own format, their places kept per segment (`breaks`). Reading cuts each page out of the text, so the tag is never drawn; the editor masks one tall field, and the window starts above a page's first line (the text gutter, and glyphs that rise above their line), so the tag's letters showed at the top of the next page (found in game). Spaces keep the line's height, so the pages don't move. `EditCheckLayout` compares the texts with tags and spaces made alike.
+- **Locked `[pagebreak]`s are blanked:** replaced by as many spaces in the tag's own format, their places kept per segment (`breaks`). Reading cuts each page out of the text, so the tag is never drawn; the editor masks one tall field, and the window starts above a page's first line (the text gutter, and glyphs that rise above their line), so the tag's letters showed at the top of the next page (found in game). Spaces keep the line's height, so the pages don't move.
 - **Typing** takes the format of the character before the caret (after it at a run's start; the hint in an empty run). With the hint (`font`, `size`), `FormatBreaks` also gives each edited run that font and size and its `\r\r` the page's outer size, as Physical Diaries' renderer does. Blood ranges are painted when the text loads (the client marks blood instead of colouring it; until 2026-10-02 old blood showed black until its run was edited) and after every edit, with or without the hint.
 - **Saving:** the runs as loaded (`EditGetBodies` right after `EnterEditMode`) are what a save compares against.
 - **Reloading** (`Editor::Reload`, the SWF's `EditReload`): the client's text rendered again rebuilds the field (`EditBuildMarked`) in place, and its reading text replaces `sBookText` (what the edit key returns to with nothing to save: without it a tear-out stayed in the book until it was reopened, found in game 2026-10-03), the caret goes to the run and offset asked, and each new run takes the saved text of the run it came from (`from`), so unsaved changes still count. `caretRun` on a session puts the caret at a run's end on entering (`EditFocusEntry`).
@@ -58,19 +58,8 @@ A line that starts with `# ` is a heading, `## ` a smaller one (no small text: `
 
 - **Reading** (`SetBookText`, so also `ReturnToReading` and `ReplaceBookText`): once the HTML is in the field and before pagination, `ReadHeadings` takes each line's mark out and enlarges the line by `HEADING_SCALE` (1.5 for `#`, 1.25 for `##`) of the size it had, from the last line up. It works on the laid-out text, so it doesn't matter what tags the line sits in; a vanilla book with a line starting `# ` gets a heading too.
 - **Writing** (`StyleHeadings`, from `EditBuildMarked` and after every edit through `FormatBreaks`): the mark stays in the field (it's text the player can delete) at size 1, and the rest of the line is the run's base size (the client's hint, else the run's first character as loaded) times the same scale. Without a hint, the run's other lines are set back to its base size on each pass (with one, `FormatBreaks` resets them). A run starting mid-line, after locked text, has no line start there. Locked text's headings are styled once as loaded (`StyleLockedHeadings`, each from its own size), so the editor shows what reading shows. Typing `# ` at a line's start makes it a heading at once; deleting the mark (two Backspaces: the caret doesn't skip it yet) makes it plain again.
-- Pages: the reading and the editing text differ by the marks, so `EditCheckLayout` reports it can't compare them.
 
 Checked in game (AE, 2026-10-03): headings appear while typing and when reading, and deleting the mark returns the line to its normal size (with a client's format hint).
-
-## The layout test
-
-Development only, to check marked text in game before the API is built. With `[Debug] LayoutTest = 1` in `InkAndQuill.ini`, `LayoutTest` owns **every book**: the edit key opens its own reading text as marked text: `TESDescription::GetDescription` with no parent, as the book menu asks (Physical Diaries' hook gives any other caller its text without font tags). English text only: for Cyrillic, Physical Diaries' hook returns Win-1251, which the SWF would read as UTF-8.
-
-- **A Physical Diaries journal** (text starting with `[pagebreak]`): everything locked but each entry's text, from after its heading's `\n\n` to its last paragraph's `</font>` (headings on only), with the font and size of its first paragraph as the hint.
-- **Any other book:** only its `[pagebreak]` tags locked.
-- **On entering**, the log says the run count and the result of `EditCheckLayout`: each editing page's first character against the reading view's (`ok (…)`, or the pages that differ). **On save** each run is logged and the save is refused with a notice: nothing is kept or charged.
-
-Passed on AE (2026-10-02) on a Physical Diaries journal, after two fixes found by it (the heading lock, the page break showing above a page). What it checks: the check says ok; the page being read is the page edited; typing, Enter, Backspace and Delete keep the fonts, sizes and alignment, in a journal entry and a vanilla book; blood text is red; saving and reading again shows the same pages.
 
 ## Blanks
 
@@ -113,9 +102,30 @@ The editor's text can't be read: `SaveFailed`, and writing goes on, so nothing i
 
 `BookMenu::ProcessMessage` is hooked (vtable index 4): a close with unsaved changes (`kHide`, or a gamepad's "Cancel") is held back and the prompt opens: **Save / Discard / Keep writing** (the cancel button). Discard calls the client's `onDiscard`. `kForceHide` (loads) passes: the changes are lost. Escape asks the menu to close, so it takes the same path. Details and why: Physical Diaries' EDITING.md, "Closing".
 
+## Suggestions
+
+Inline completion for clients (`Suggest`, [API.md](API.md#suggestions)). Code: `Suggestions` and book.swf's `EditSuggest*`.
+
+- **Drawn** in its own text field on the edit clip, under the same mask (`ShowSuggestion`): at the caret's left edge on its line, in the font and size of the character before the caret, in `SUGGEST_COLOR` (`#2A2520`: lighter faded inks were hard to read on the vanilla page; the Convenient Reading variant uses the same colour). One line, no wrapping: a suggestion too long for the rest of the line is cut at the field's right edge with "...".
+- **State is the SWF's:** the list, the one shown, and the caret position it was given for. `EditSuggesting` is false once the caret has moved, so a stale suggestion takes no keys. `EditReload`, `EditGoToPage` (page turns) and `ExitEditMode` clear it; the plugin clears it before a prompt and on every key that isn't the suggestion's (`Suggestions::HandleKey`, first in `HandleKey`).
+- **Accepting** takes the text from the SWF and types it through `AppendEditChar`, as a paste: the same format, blood and `onChange` as typing.
+
+## Quill cursor
+
+**Deferred past 1.0** (2026-10-03): shown only with `Debug.QuillAdjust=1`. Open: the caret-to-page mapping strays (calibrated tracking narrowed it; not saved or confirmed), the right page of a spread, books' own pose. While writing, the game's own quill (the model of Skyrim.esm's Quill, `04C3C8`, so a replacer's when one is installed) sits on the open book: it's a node in the book menu's 3D scene, a child of `BookMenu`'s `bookModel`, not an image in the SWF. Nothing of the model is shipped. Code: `QuillCursor`.
+
+- The model database's copy is shared and comes with its root hidden: the book gets a clone with `kHidden` cleared and its collision dropped (with it, every update put the quill back where its physics body was). Its world transform is set from the book's and pushed down (`Update` alone left it where it loaded).
+- The book's space (AE, vanilla journal): the camera looks down -y at the book, about 195 units away; the text quad `PageText` faces the camera.
+- **Following the caret:** book.swf gives the caret's point on the stage (`EditCaretPoint`: the caret's left edge at its line's bottom). `PageText`'s vertices (read from its CPU vertex data once per book) give the quad the page texture lands on, by UV; the stage point within the visible stage (`GetVisibleFrameRect`: wider than the 300 by 475 stage) is a UV, and the quad turns it into a point on the book (the page shows the texture turned half round: both directions run against the UVs, seen in game). The quill's pose is in the quad's space (an offset from that point, a rotation and a scale), so it sits the same on any book model: one pose for books, one for notes. Worked out every frame. Not checked yet: that the stage maps to the quad's UVs one to one, and the right page of a spread.
+
+**Adjust mode** (development, `Debug.QuillAdjust=1`): while writing, the numpad moves the quill along the camera's axes (4/6 across, 2/8 up and down, 7/9 toward and away), `/` switches to turning about the same axes, `+`/`-` scale, `*` cycles the step size (0.02 to 2 units, 0.5° to 15°; it starts at 0.1 and 1°), `0` resets it onto the caret (a third of the page's size, lifted toward the camera), `1` calibrates tracking (below), and `5` logs a sample: its pose (an offset from the caret's point, in the page's space) and the caret (`side,page,x,y,gx,gy`). The configured poses are kept in `SKSE/Plugins/InkAndQuill_QuillPose.ini` (`[Book]` and `[Note]`: `Pose = x y z scale` then the rotation's rows; one with no pose uses the other's): read when the quill appears, saved with numpad Enter, restored with `.`; adjusting doesn't save, and it can be edited by hand. The HUD text is development-only, not translated.
+
+**Calibrated tracking:** the UV mapping alone lets the quill stray more the further the caret goes from where the pose was set (seen in game: the line's start mapped past the quad's UV edge, and a nib above the page moves faster on screen than the text). Line the nib up on the caret, press numpad `1`, move the caret well right and down, line it up again, `1`: the quill then moves by `kx`, `ky` page units per stage unit from the first point (`Track = gx gy kx ky` beside the pose, saved with it). Move it only across the page between the two points, not toward the camera.
+
 ## Not done yet
 
-- **The API**: version 1 is built ([API.md](API.md)); Physical Diaries uses its sessions, blanks, keys and prompts (AE). Physical Letters doesn't use Ink & Quill yet. No Papyrus API is planned ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
+- **The quill cursor** is deferred past 1.0 ([Quill cursor](#quill-cursor)).
+- **The API**: version 1 is built ([API.md](API.md)); Physical Diaries uses its sessions, blanks, keys and prompts (AE). Physical Letters' letter editor is a client (its recipient preview uses `onChange`). No Papyrus API is planned ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 - **Renamed inkwells** ran on AE: the hand-made extra list works and the name survives save and load (2026-10-03). Not tested: dropping and picking up, containers, selling and buying back, SkyUI showing the name, SE.
 - **Translations** beyond English (the editor's strings and the MCM's).
 - **Input blocking and unpaused writing** ran on AE (2026-10-03): every mod's hotkeys blocked but those that poll the keyboard. Not tested: VR's dispatch offset, a mod hooking the same dispatch call after Ink & Quill, and clients' registered keys (`RegisterKeys`).

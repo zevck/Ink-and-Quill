@@ -2,7 +2,7 @@
 
 How a client mod uses Ink & Quill's editor. Header: `include/InkAndQuillAPI.h` (plain C; copy it into the client). Code: `src/API.cpp`, over `Editor` and `WritingTools`. The design and its reasons are in [API_DESIGN.md](API_DESIGN.md); the editor's behaviour in [EDITOR.md](EDITOR.md).
 
-**Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries uses it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
+**Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries and Physical Letters use it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 
 ## Getting it
 
@@ -19,7 +19,7 @@ if (auto* module = GetModuleHandleA("InkAndQuill.dll")) {
 
 ## Rules
 
-- **Threads.** Every callback comes where SKSE runs UI tasks (`AddUITask`): with the book menu, paused or not, Ink & Quill queues its input work there ([EDITOR.md](EDITOR.md#input)). Session calls (`BeginSession`, `CurrentRuns`, `Reload`, `CaretRun`, `Prompt`, the replies) are made there too: from a callback, or a client's own key handler queuing a UI task first. Registration calls (`AddOwner`, `RegisterBlank`, `RegisterKeys`, `SetClientName`) are fine from SKSE's messaging (`kDataLoaded`) as well.
+- **Threads.** Every callback comes where SKSE runs UI tasks (`AddUITask`): with the book menu, paused or not, Ink & Quill queues its input work there ([EDITOR.md](EDITOR.md#input)). Session calls (`BeginSession`, `CurrentRuns`, `Reload`, `CaretRun`, `Prompt`, `Suggest`, the replies) are made there too: from a callback, or a client's own key handler queuing a UI task first. Registration calls (`AddOwner`, `RegisterBlank`, `RegisterKeys`, `SetClientName`) are fine from SKSE's messaging (`kDataLoaded`) as well.
 - **Strings are UTF-8.** Ink & Quill copies every string it's given before the call returns; strings it passes to a callback are valid until the callback returns.
 - **The answer to a save** goes through `ReplySave` or `ReplySaveAsBook`, which copy, so a client can answer with a temporary string.
 - **`onEnd` is always called, once, last**, for every session handed to `BeginSession` or `BeginSessionOnOpen`, whether it wrote, was discarded, never started (no quill, writing off, blood declined) or was cut off by a load. That's where a client frees what `user` points to.
@@ -39,6 +39,27 @@ What a session edits: the book's text as the client renders it for reading, with
 
 - **`IsWriting`, `InBlood`:** blood is chosen when writing starts, so a client rendering a new heading knows whether to make it red. Before a session begins, `WouldBeInBlood` says whether it would be (quill and ink required, blood on, a quill but no ink), unless the player declines the prompt.
 - **Changing the structure** (a client's own action, e.g. Physical Diaries' new entry or tear-out, on its own keys): `CurrentRuns(visit, user)` gives the runs as the player has them, unsaved text included; the client renders its text again from those and its change, then `Reload(markedText, readingText, from, count, caretRun, caretOffset)`. `readingText` is the book's text as it now reads (as for a save's reply): a structure change alone (a tear-out) changes no run's text, so the edit key returns to reading without a save, and shows this. `from[i]` is the run that new run `i` was before (-1 for a new one), `count` the number of new runs: each run keeps the text it was last saved with, so unsaved changes still prompt on close. The caret goes to `caretRun` at `caretOffset` (-1: its end).
+
+## Reacting to typing
+
+`onChange(user, run, caretOffset)` (optional, in `IQ_Session`): the player changed a run's text, for a client that reacts to what's typed (Physical Letters' faded recipient preview after the "To:" name; a word count; validation).
+
+- **When:** after every key that changes a run: typing (Enter and a dead key's result included), Backspace and Delete when they erase something, and a paste. Not for caret moves, page turns, a save, or the client's own `Reload`.
+- **Where:** in the key's own UI task, right after the editor has the change: a `Reload` from here (the caret back at `run`, `caretOffset`) is shown with the keystroke, so the old and new text never show together.
+- **`run`, `caretOffset`:** the edited run (the caret's, after the edit) and the caret's place in it, in characters from the run's start (what `Reload` takes).
+- **Inside it:** `CurrentRuns`, `CaretRun` and `Reload`; a `Reload` keeps unsaved-change tracking as usual (`from`) and never calls `onChange` again.
+- **Not called** after `onEnd`, while a prompt is open, or for a session that isn't writing.
+- **Cost:** a held key calls it once per repeated character: keep it cheap, and `Reload` only when something actually changes.
+
+## Suggestions
+
+`Suggest(completions, count)`: inline completion. The client gives candidates for the text at the caret, each the text that would follow it ("ia", then ", 6391 Whiterun"); Ink & Quill shows them and owns their keys. Clients still take no keys.
+
+- **Shown** one at a time, faded, right after the caret, apart from the text: runs, layout and the format typed text takes are untouched, and a save never contains one. One too long for the rest of the line is cut with "..." at the page's edge (accepting still types all of it). Written in blood or not, a suggestion is faded ink.
+- **Keys**, only while one shows: **Tab** the next (wrapping), **Shift+Tab** the previous, **Right** accepts it (typed as if the player had typed it, in blood when writing in blood, and `onChange` fires, so the client can suggest the next part), **Escape** dismisses it (the next Escape closes the book as usual).
+- **Cleared** by any other key, a caret move, a page turn, a save, a prompt, a `Reload`, or the session ending. A typed character clears it before `onChange`, so a client suggesting from `onChange` shows the next one with the same keystroke.
+- **Usually called from `onChange`**, but any time once writing has begun (`IsWriting`) works, from a UI task. Right after `BeginSession` writing may not have begun yet (the blood prompt, `BeginSessionOnOpen`): `Suggest` then returns false. The candidates are for the caret where it is at the call; a `count` of 0 clears them. Strings are copied, and cleaned to one line (control characters and the lock and blood markers dropped).
+- **False:** not writing, or a prompt open.
 
 ## Blanks
 

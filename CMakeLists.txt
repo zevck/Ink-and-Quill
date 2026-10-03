@@ -33,10 +33,11 @@ set(sources
     src/Clients.cpp
     src/Editor.cpp
     src/Keys.cpp
-    src/LayoutTest.cpp
     src/Papyrus.cpp
+    src/QuillCursor.cpp
     src/Settings.cpp
     src/Strings.cpp
+    src/Suggestions.cpp
     src/WritingMode.cpp
     src/WritingTools.cpp
 )
