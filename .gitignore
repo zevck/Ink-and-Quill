@@ -1,0 +1,21 @@
+/build
+/vcpkg_installed
+/.claude
+
+*.dll
+*.pdb
+*.pex
+*.zip
+*.7z
+
+# Machine-specific build settings
+Build_Config_Local.ps1
+
+# Downloaded tools (Spriggit CLI)
+/external
+
+# Pyro project (machine paths)
+skyrimse.ppj
+
+# Built SWFs (sources in swf/)
+Interface/*.swf
