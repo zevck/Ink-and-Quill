@@ -19,7 +19,7 @@ class BookMenu extends MovieClip
    // Mod-neutral: Ink & Quill ships it for every client.  Bump when a call is added; a plugin needs at least its version.
    static var WRITING_INTERFACE = "BOOKMENU_WRITING_INTERFACE=4";
    // Text written in blood (2): dark red, marked in the plugin's text between these two
-   // private-use characters (see ParseBlood, MarkBlood).
+   // private-use characters (see EditBuildMarked, MarkBlood).
    static var BLOOD_COLOR = 0x2B0202;
    static var BLOOD_OPEN = 0xE000;
    static var BLOOD_CLOSE = 0xE001;
@@ -50,17 +50,13 @@ class BookMenu extends MovieClip
    var EditMask;         // shows one page of EditField
    var iSuppressTurnUntil;   // getTimer() before which engine page turns are refused (key presses)
    var iEditShownFrom;   // books: offset of the engine's current spread in its 4 page slots (0 or 2)
-   var aSegs;            // the text as segments: {locked, body, editable} lengths, in order (see EditBuildContent)
-   var oEditContent;     // what the plugin sent (SetEditContent) for the next edit mode, or undefined: blank page
+   var aSegs;            // the text as segments: {locked, body, editable} lengths, in order (see EditBuildMarked)
    var oContentFmt;      // entry text's format (config font, content size)
-   var oBreakFmt;        // blank lines' format, as reading has them (see EditBuildContent)
+   var oBreakFmt;        // blank lines' format, as reading has them (see EditBuildMarked)
    var bTextReceived;    // SetBookText has run (EditReady)
    var sBookText;        // the text reading shows now (SetBookText): ReturnToReading with no text reads it again
-   var iDatesStart;      // the title page's date range in EditField (see EditSetDates)
-   var iDatesLength;
    var bBlood;           // this writing session is in blood: typed text is red (EditSetBlood)
    var oEditMarked;      // marked text from the plugin (SetEditMarked) for the next edit mode: {text, font, size}
-   var bMarked;          // this edit mode was built from marked text: pages break at [pagebreak] lines
    var aEditPageBottoms; // y where each page's text ends (a [pagebreak] line is on neither page)
 
    function BookMenu()
@@ -140,7 +136,6 @@ class BookMenu extends MovieClip
    {
       this.bEditMode = true;
       this.bBlood = false;
-      this.bMarked = false;
       // The page being read (at the book's opening: page 0). A book's spread is in engine
       // slots 0-1 or 2-3 (see iEditShownFrom); editing starts on the same page and slots.
       var readPage = this.iLeftPageNumber;
@@ -212,7 +207,7 @@ class BookMenu extends MovieClip
 
       this.iEditPage = 0;
       this.iEditShownFrom = 0;
-      this.EditBuildContent(fmt);
+      this.EditBuildMarked();
       var start = this.EditSnap(0, 1);
       this.EditSetCaretOrNone(start);
       this.EditLayout();
@@ -232,29 +227,26 @@ class BookMenu extends MovieClip
 
    // ---- Content: locked text and editable bodies ----
 
-   // From the plugin, before EnterEditMode: title and dates go on the title page; entries is "heading\x1Fbody" per
-   // entry, joined by \x1E.  Headings are locked; each body is editable (entry i of EditGetBodies).
-   function SetEditContent(font, titleSize, smallSize, dateSize, contentSize, title, dates, entries)
-   {
-      this.oEditContent = {font:font, titleSize:titleSize, smallSize:smallSize, dateSize:dateSize, contentSize:contentSize, title:title, dates:dates, entries:entries.length ? entries.split(String.fromCharCode(30)) : []};
-   }
-
    // From the plugin, before EnterEditMode (4): the book's own text as reading shows it, with what the player can't
    // change between LOCK_OPEN and LOCK_CLOSE.  font and size (optional): the format typed text takes, and paragraph
    // breaks get the page's outer size (FormatBreaks); without them typed text takes its neighbour's format.
    function SetEditMarked(text, font, size)
    {
       this.oEditMarked = {text:text, font:font, size:size};
-      this.oEditContent = undefined;
    }
 
    // From the plugin, while writing marked text (4): the client's text rendered again (a new entry, a tear-out). The
    // caret goes to run caretRun at caretOffset (-1: its end), on its page. Returns the number of runs, or -1.
-   function EditReload(text, font, size, caretRun, caretOffset)
+   function EditReload(text, font, size, caretRun, caretOffset, readingText)
    {
-      if(!this.bEditMode || !this.bMarked || this.EditField == undefined)
+      if(!this.bEditMode || this.EditField == undefined)
       {
          return -1;
+      }
+      // What reading shows if the edit key returns with nothing to save (a tear-out changes no run's text).
+      if(readingText != undefined && readingText.length)
+      {
+         this.sBookText = readingText;
       }
       this.oEditMarked = {text:text, font:font, size:size};
       this.EditBuildMarked();
@@ -286,121 +278,12 @@ class BookMenu extends MovieClip
       return runs;
    }
 
-   static function FieldText(str)
-   {
-      return str.split("\r\n").join("\r").split("\n").join("\r");
-   }
-
-   // Fill EditField and aSegs with FormatDiaryEntries' layout so each page matches the reading view line for line.
-   // Each segment after the first starts with a locked "\r" and a new page; line breaks: see FormatBreaks.
-   function EditBuildContent(baseFmt)
-   {
-      if(this.oEditMarked != undefined)
-      {
-         this.EditBuildMarked();
-         return undefined;
-      }
-      var c = this.oEditContent;
-      if(c == undefined)
-      {
-         this.aSegs = [{locked:0, body:0, editable:true}];
-         this.EditField.text = "";
-         return undefined;
-      }
-      var text = "";
-      var styles = [];   // {start, end, size, align}
-      var segs = [];
-      // Blank first page, then the title page: seven blank lines, the title, two blank
-      // lines, the date range.
-      segs.push({locked:0, body:0, editable:false});
-      var title = "\r\r\r\r\r\r\r\r";
-      var tStart = title.length;
-      title += BookMenu.FieldText(c.title);
-      styles.push({start:tStart, end:title.length, size:c.titleSize, align:"center"});
-      title += "\r\r\r";
-      var dStart = title.length;
-      title += BookMenu.FieldText(c.dates);
-      this.iDatesStart = dStart;   // the title page comes first, so this is also the field offset
-      this.iDatesLength = title.length - dStart;
-      styles.push({start:dStart, end:title.length, size:c.smallSize, align:"center"});
-      segs.push({locked:title.length, body:0, editable:false});
-      text += title;
-      var i = 0;
-      while(i < c.entries.length)
-      {
-         var parts = c.entries[i].split(String.fromCharCode(31));
-         var parsedHeading = BookMenu.ParseBlood(BookMenu.FieldText(parts[0]));
-         var heading = parsedHeading.text;
-         var parsed = BookMenu.ParseBlood(BookMenu.FieldText(parts[1] == undefined ? "" : parts[1]));
-         var body = parsed.text;
-         // An entry's page: a blank line, then the heading and a blank line (if headings are on).
-         var locked = "\r\r";
-         if(heading.length)
-         {
-            styles.push({start:text.length + 2, end:text.length + 2 + heading.length, size:c.dateSize, align:"left", blood:parsedHeading.ranges.length > 0});
-            locked += heading + "\r\r";
-         }
-         segs.push({locked:locked.length, body:body.length, editable:true, blood:parsed.ranges});
-         text += locked + body;
-         i++;
-      }
-      this.EditField.text = text;
-      baseFmt.font = c.font;
-      baseFmt.size = c.contentSize;
-      baseFmt.align = "left";
-      this.EditField.setTextFormat(baseFmt);
-      this.EditField.setNewTextFormat(baseFmt);
-      i = 0;
-      while(i < styles.length)
-      {
-         var f = new TextFormat();
-         f.size = styles[i].size;
-         f.align = styles[i].align;
-         if(styles[i].blood)
-         {
-            f.color = BookMenu.BLOOD_COLOR;
-         }
-         if(styles[i].end > styles[i].start)
-         {
-            this.EditField.setTextFormat(styles[i].start, styles[i].end, f);
-         }
-         i++;
-      }
-      this.aSegs = segs;
-      this.oContentFmt = baseFmt;
-      // The page field's own font and the book text's outer size: what reading gives the line
-      // breaks outside SNPD's font tags (the page's default font, in BookMenu's size wrapper).
-      this.oBreakFmt = new TextFormat();
-      this.oBreakFmt.font = this.RefTextFieldTextFormat.font;
-      this.oBreakFmt.size = this.PageTextSize();
-      var k = 0;
-      while(k < segs.length)
-      {
-         var start = this.SegStart(k);
-         var j = start;
-         while(j < start + segs[k].locked)
-         {
-            if(text.charAt(j) == "\r")
-            {
-               this.EditField.setTextFormat(j, j + 1, this.oBreakFmt);
-            }
-            j++;
-         }
-         if(segs[k].editable)
-         {
-            this.FormatBreaks(k);
-         }
-         k++;
-      }
-   }
-
    // The marked text laid out as SetBookText lays out the reading text, then the markers taken out: locked ranges,
    // editable runs between them (every gap between a close and the next open, even empty; text before the first lock
    // or after the last one only if there is any), blood ranges per run.
    function EditBuildMarked()
    {
       var m = this.oEditMarked;
-      this.bMarked = true;
       this.EditField.html = true;
       this.EditField.setNewTextFormat(this.RefTextFieldTextFormat);
       this.EditField.SetText(this.PageHtml(m.text), true);
@@ -544,9 +427,9 @@ class BookMenu extends MovieClip
    // "ok (...)" or what differs.
    function EditCheckLayout()
    {
-      if(!this.bMarked || this.aEditPageLines == undefined)
+      if(this.aEditPageLines == undefined)
       {
-         return "not marked text";
+         return "no pages";
       }
       if(this.iPaginationIndex != -1 || this.PageInfoA == undefined)
       {
@@ -594,8 +477,8 @@ class BookMenu extends MovieClip
       return out.length ? "differs (" + counts + "):" + out : "ok (" + counts + ")";
    }
 
-   // Body k's formats as FormatDiaryEntries gives them: paragraphs at the content size, each "\r\r" between them in
-   // the page's outer size (outside the font tags; it sets a blank line's height).  Re-run after every body edit.
+   // Body k's formats after an edit.  With the plugin's hint (SetEditMarked's font and size): its text in them, each
+   // "\r\r" in the page's outer size, as a renderer that tags paragraphs gives them.  Its blood red, always.
    function FormatBreaks(k)
    {
       var start = this.BodyStart(k);
@@ -669,41 +552,6 @@ class BookMenu extends MovieClip
          i++;
       }
       return out;
-   }
-
-   // A body from the plugin: its text without the blood markers, and the red ranges.
-   static function ParseBlood(str)
-   {
-      var text = "";
-      var ranges = [];
-      var open = -1;
-      var i = 0;
-      while(i < str.length)
-      {
-         var c = str.charCodeAt(i);
-         if(c == BookMenu.BLOOD_OPEN)
-         {
-            open = text.length;
-         }
-         else if(c == BookMenu.BLOOD_CLOSE)
-         {
-            if(open >= 0)
-            {
-               ranges.push({s:open, e:text.length});
-            }
-            open = -1;
-         }
-         else
-         {
-            text += str.charAt(i);
-         }
-         i++;
-      }
-      if(open >= 0)
-      {
-         ranges.push({s:open, e:text.length});
-      }
-      return {text:text, ranges:BookMenu.MergeRanges(ranges)};
    }
 
    // A body for the plugin: the text with the blood markers around each red range.
@@ -864,60 +712,6 @@ class BookMenu extends MovieClip
       return this.bTextReceived == true;
    }
 
-   // A new, empty entry at the end: a new page with its locked heading and an empty body, the caret in it.
-   // Returns its index among the entries, or -1.
-   function EditAppendEntry(heading)
-   {
-      if(this.aSegs == undefined || this.EditField == undefined || this.oBreakFmt == undefined)
-      {
-         return -1;
-      }
-      var start = this.EditField.length;
-      var parsedHeading = BookMenu.ParseBlood(BookMenu.FieldText(heading));
-      var h = parsedHeading.text;
-      var locked = "\r\r";
-      if(h.length)
-      {
-         locked += h + "\r\r";
-      }
-      this.EditField.replaceText(start, start, locked);
-      this.EditField.setTextFormat(start, start + locked.length, this.oContentFmt);
-      var j = start;
-      while(j < start + locked.length)
-      {
-         if(this.EditField.text.charAt(j) == "\r")
-         {
-            this.EditField.setTextFormat(j, j + 1, this.oBreakFmt);
-         }
-         j++;
-      }
-      if(h.length)
-      {
-         var f = new TextFormat();
-         f.size = this.oEditContent.dateSize;
-         f.align = "left";
-         if(parsedHeading.ranges.length)
-         {
-            f.color = BookMenu.BLOOD_COLOR;
-         }
-         this.EditField.setTextFormat(start + 2, start + 2 + h.length, f);
-      }
-      this.aSegs.push({locked:locked.length, body:0, editable:true, blood:[]});
-      this.EditSetCaret(this.EditField.length);
-      this.EditLayout();
-      var entries = 0;
-      var k = 0;
-      while(k < this.aSegs.length)
-      {
-         if(this.aSegs[k].editable)
-         {
-            entries++;
-         }
-         k++;
-      }
-      return entries - 1;
-   }
-
    // Put the caret at the end of entry i's text and show it.
    function EditFocusEntry(i)
    {
@@ -962,33 +756,6 @@ class BookMenu extends MovieClip
       return entry;
    }
 
-   // Take entry i's pages out of the editor (heading and text): it was torn out. The caret
-   // goes to the end of the entry before it, or the start of the one after.
-   function EditRemoveEntry(i)
-   {
-      var k = 0;
-      var entry = -1;
-      while(k < this.aSegs.length)
-      {
-         if(this.aSegs[k].editable && ++entry == i)
-         {
-            break;
-         }
-         k++;
-      }
-      if(k >= this.aSegs.length)
-      {
-         return false;
-      }
-      var start = this.SegStart(k);
-      this.EditField.replaceText(start, start + this.aSegs[k].locked + this.aSegs[k].body, "");
-      this.aSegs.splice(k, 1);
-      var pos = this.EditSnap(start, -1);
-      this.EditSetCaretOrNone(pos);
-      this.EditLayout();
-      return true;
-   }
-
    // The caret at pos, or none at all when there is no entry to type in (pos -1): a caret on
    // the blank or title page would look editable.
    function EditSetCaretOrNone(pos)
@@ -1004,37 +771,6 @@ class BookMenu extends MovieClip
       {
          this.EditSetCaret(pos);
       }
-   }
-
-   // The title page's date range, after entries were added or torn out (FormatDiaryEntries'
-   // TitlePageDates, from the plugin).
-   function EditSetDates(dates)
-   {
-      if(this.aSegs == undefined || this.aSegs.length < 2 || this.iDatesStart == undefined)
-      {
-         return false;
-      }
-      var text = BookMenu.FieldText(dates);
-      var delta = text.length - this.iDatesLength;
-      var hadFocus = Selection.getFocus() != null;
-      var caret = this.EditCaret();
-      this.EditField.replaceText(this.iDatesStart, this.iDatesStart + this.iDatesLength, text);
-      if(text.length)
-      {
-         this.EditField.setTextFormat(this.iDatesStart, this.iDatesStart + text.length, this.oContentFmt);
-         var f = new TextFormat();
-         f.size = this.oEditContent.smallSize;
-         f.align = "center";
-         this.EditField.setTextFormat(this.iDatesStart, this.iDatesStart + text.length, f);
-      }
-      this.iDatesLength = text.length;
-      this.aSegs[1].locked += delta;
-      if(hadFocus && caret > this.iDatesStart)
-      {
-         this.EditSetCaret(caret + delta);
-      }
-      this.EditLayout();
-      return true;
    }
 
    // Leave edit mode and read again on the spread being edited, with the text rendered from the saved entries (none: the text the book had).
@@ -1129,54 +865,37 @@ class BookMenu extends MovieClip
       var y = 2;   // Flash's text gutter: line 0 starts 2px down
       var caretLine = this.EditCaretLine();
       var caretPage = 0;
-      // Every segment after the first starts a page, on the line after its locked "\r".
-      var nextSeg = 1;
-      var nextSegLine = this.aSegs.length > 1 ? this.SegStart(1) + 1 : -1;
-      // Marked text: where the blanked [pagebreak]s are (EditBuildMarked).
+      // Where the blanked [pagebreak]s are (EditBuildMarked).
       var breakAt = {};
-      if(this.bMarked)
+      var bk = 0;
+      while(bk < this.aSegs.length)
       {
-         var bk = 0;
-         while(bk < this.aSegs.length)
+         var b = 0;
+         while(this.aSegs[bk].breaks != undefined && b < this.aSegs[bk].breaks.length)
          {
-            var b = 0;
-            while(this.aSegs[bk].breaks != undefined && b < this.aSegs[bk].breaks.length)
-            {
-               breakAt[this.SegStart(bk) + this.aSegs[bk].breaks[b]] = true;
-               b++;
-            }
-            bk++;
+            breakAt[this.SegStart(bk) + this.aSegs[bk].breaks[b]] = true;
+            b++;
          }
+         bk++;
       }
       var i = 0;
       while(i < tf.numLines)
       {
          var m = tf.getLineMetrics(i);
          var off = tf.getLineOffset(i);
-         var forced = false;
-         while(!this.bMarked && nextSegLine >= 0 && nextSegLine <= off)
+         // As CalculatePagination: a [pagebreak] line ends the page above it, and the next starts below it.
+         var lineEnd = i + 1 < tf.numLines ? tf.getLineOffset(i + 1) : tf.length;
+         if(breakAt[off] || Shared.GlobalFunc.StringTrim(tf.text.substring(off, lineEnd)) == BookMenu.PAGE_BREAK_TAG)
          {
-            forced = forced || nextSegLine == off;
-            nextSeg++;
-            nextSegLine = nextSeg < this.aSegs.length ? this.SegStart(nextSeg) + 1 : -1;
+            bottoms[tops.length - 1] = y;
+            y += m.height;
+            tops.push(y);
+            firstLines.push(i + 1);
+            i++;
+            continue;
          }
-         if(this.bMarked)
-         {
-            // As CalculatePagination: a [pagebreak] line ends the page above it, and the next starts below it.
-            var lineEnd = i + 1 < tf.numLines ? tf.getLineOffset(i + 1) : tf.length;
-            if(breakAt[off] || Shared.GlobalFunc.StringTrim(tf.text.substring(off, lineEnd)) == BookMenu.PAGE_BREAK_TAG)
-            {
-               bottoms[tops.length - 1] = y;
-               y += m.height;
-               tops.push(y);
-               firstLines.push(i + 1);
-               i++;
-               continue;
-            }
-         }
-         // Same rule as CalculatePagination: a line whose bottom passes the page starts a new
-         // page; so does each segment's first line.
-         if(i > 0 && (forced || y + m.ascent + m.descent > tops[tops.length - 1] + this.iMaxPageHeight))
+         // Same rule as CalculatePagination: a line whose bottom passes the page starts a new page.
+         if(i > 0 && y + m.ascent + m.descent > tops[tops.length - 1] + this.iMaxPageHeight)
          {
             bottoms[tops.length - 1] = y;
             tops.push(y);
@@ -1323,22 +1042,19 @@ class BookMenu extends MovieClip
       {
          return undefined;
       }
+      // The format of the text it's typed into (the hint's in an empty run).
       var fmt = this.EditField.getNewTextFormat();
-      if(this.bMarked)
+      if(pos > this.BodyStart(k))
       {
-         // Marked text: the format of the text it's typed into.
-         if(pos > this.BodyStart(k))
-         {
-            fmt = this.EditField.getTextFormat(pos - 1, pos);
-         }
-         else if(pos < this.BodyEnd(k))
-         {
-            fmt = this.EditField.getTextFormat(pos, pos + 1);
-         }
-         else if(this.oContentFmt != undefined)
-         {
-            fmt = this.oContentFmt;
-         }
+         fmt = this.EditField.getTextFormat(pos - 1, pos);
+      }
+      else if(pos < this.BodyEnd(k))
+      {
+         fmt = this.EditField.getTextFormat(pos, pos + 1);
+      }
+      else if(this.oContentFmt != undefined)
+      {
+         fmt = this.oContentFmt;
       }
       this.EditField.replaceText(pos, pos, ch);
       this.EditField.setTextFormat(pos, pos + ch.length, fmt);
@@ -1473,9 +1189,7 @@ class BookMenu extends MovieClip
       }
       this.bEditMode = false;
       this.iEditPage = 0;
-      this.oEditContent = undefined;
       this.oEditMarked = undefined;
-      this.bMarked = false;
       this.aSegs = undefined;
    }
 

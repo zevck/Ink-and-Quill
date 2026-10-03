@@ -65,7 +65,7 @@ A client's own actions while writing (Physical Diaries' new entry and tear-out) 
 
 ## Blanks
 
-Built ([API.md](API.md#blanks), [EDITOR.md](EDITOR.md#blanks)). `RegisterBlank(form, onOpen)`: reading the blank from the player's inventory (with the menu paused) calls the client, which begins a session with its starting text. On the first accepted save the client makes its item and answers with it (`ReplySaveAsBook`); Ink & Quill charges the costs, removes one blank and shows the new book in the open menu. Read anywhere else (in the world, a container, a shop), a blank is just an empty book. When the blank becomes the client's book is the client's choice (2026-10-02): at once (`ReplaceBlank` in `onOpen`) or on the first save (`ReplySaveAsBook`).
+Built ([API.md](API.md#blanks), [EDITOR.md](EDITOR.md#blanks)). `RegisterBlank(form, onOpen)`: reading the blank from the player's inventory calls the client, which begins a session with its starting text. On the first accepted save the client makes its item and answers with it (`ReplySaveAsBook`); Ink & Quill charges the costs, removes one blank and shows the new book in the open menu. Read anywhere else (in the world, a container, a shop), a blank is just an empty book. When the blank becomes the client's book is the client's choice (2026-10-02): at once (`ReplaceBlank` in `onOpen`) or on the first save (`ReplySaveAsBook`).
 
 ## Limits
 
@@ -77,7 +77,7 @@ UTF-8 text, `\n` line breaks. Blood text between U+E000 and U+E001 (Physical Dia
 
 ## C++ API
 
-Built as version 1: [API.md](API.md) and `include/InkAndQuillAPI.h` are the reference; the sketch below is the design it came from.
+Built (version 1): [API.md](API.md) and `include/InkAndQuillAPI.h` are the reference; the sketch below is the design it came from.
 
 
 C ABI, so clients built with another compiler or CRT work: `InkAndQuill.dll` exports `IQ_GetAPI(version)` returning a struct of function pointers; strings are `const char*` (UTF-8), callbacks are plain function pointers with a `void* user` argument, and every struct starts with its size so later versions can grow it. Clients resolve it at `kPostLoad` (`GetModuleHandle` + `GetProcAddress`, as SkyrimNet's API). Calls are game-thread only unless noted.
@@ -122,7 +122,7 @@ Papyrus requests are one unlocked run under a locked title, ink per save, no con
 ## Settings and detection
 
 - **Writing on/off:** detected from `book.swf` as Physical Diaries does now (the marker `BOOKMENU_WRITING_INTERFACE=<n>` in the uncompressed file); `IsWritingOn()` tells clients. Ink & Quill is the only mod shipping `book.swf`.
-- **Keys:** the edit key (start writing in the open book, if a client or blank owns it; on any other book it does nothing) is Ink & Quill's, in its MCM. Clients' own keys (Physical Diaries' new-entry key) stay theirs; they call `BeginSession`.
+- **Keys:** the edit key (start writing in the open book, if a client or blank owns it; on any other book it does nothing) is Ink & Quill's, in its MCM. Clients' own keys (Physical Diaries' new entry, tear-out) stay theirs: they register them (`RegisterKeys`) so they get through while writing, and call `BeginSession`, `Reload` or `Prompt`.
 - **Strings:** the editor's prompts and notices are Ink & Quill's, in its translation files. Messages a client returns (a refused save) are the client's.
 
 ## Moving from Physical Diaries
@@ -140,3 +140,4 @@ Papyrus requests are one unlocked run under a locked title, ink per save, no con
 - VR isn't a target: the editor needs a keyboard; it may work there, untested and unsupported.
 - Layout belongs to the client: marked text, everything editable unless locked (2026-10-02; [Marked text](#marked-text-agreed-2026-10-02)).
 - No "To:" field or suggestions: a letter's recipient is the client's to resolve (2026-10-02).
+- No tear-out or remove key: a client's own actions and keys are its own (2026-10-02). Ink & Quill only shows a client's question (`Prompt`), tells it the caret's run (`CaretRun`) and lets its keys through (`RegisterKeys`) (2026-10-03).

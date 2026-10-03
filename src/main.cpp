@@ -19,6 +19,7 @@
 
 #include "Editor.h"
 #include "LayoutTest.h"
+#include "Papyrus.h"
 #include "Settings.h"
 #include "Strings.h"
 #include "WritingMode.h"
@@ -46,8 +47,14 @@ namespace {
             }
             break;
         case SKSE::MessagingInterface::kPreLoadGame:
+            InkAndQuill::Editor::Reset();
+            break;
         case SKSE::MessagingInterface::kNewGame:
             InkAndQuill::Editor::Reset();
+            if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Editor::InstallInputHook();
+            break;
+        case SKSE::MessagingInterface::kPostLoadGame:
+            if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Editor::InstallInputHook();
             break;
         default:
             break;
@@ -83,5 +90,6 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
         SKSE::log::error("Couldn't register for SKSE messages");
         return false;
     }
+    InkAndQuill::Papyrus::Register();
     return true;
 }

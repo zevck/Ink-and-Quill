@@ -8,7 +8,7 @@ SKSE plugin (CommonLibSSE-NG, C++23; one DLL for SE and AE): "Ink & Quill - Writ
 
 - Clients own their items, storage and meaning; Ink & Quill never stores a client's documents.
 - The editor was copied from SkyrimNet Physical Diaries (its `swf/book`, `WritingMode`, `WritingTools` and the session parts of `BookEditor`), see [docs/EDITOR.md](docs/EDITOR.md); until Physical Diaries uses Ink & Quill, its copy is the reference for the editor's history.
-- Game state only on the game thread (`SKSE::GetTaskInterface()->AddTask`), and every task catches exceptions.
+- Game state only on the game thread (`SKSE::GetTaskInterface()->AddTask`); the editor's input work as UI tasks (`AddUITask`, see docs/EDITOR.md#input). Every task catches exceptions.
 - Text the player sees is translatable (the translation files), never hard-coded English.
 
 ## Build

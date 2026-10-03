@@ -19,6 +19,8 @@
 
 #include "WritingTools.h"
 
+#include "Settings.h"
+
 #include <charconv>
 #include <cstring>
 
@@ -26,12 +28,16 @@ namespace InkAndQuill::WritingTools {
 
     namespace {
 
-        // Saves a full inkwell lasts.
-        constexpr int kUses = 10;
-
-        // Writing in blood: this share of the player's maximum health per save, never below kMinHealthAfterBleeding.
-        constexpr float kBloodCost = 0.1f;
+        // Writing in blood never leaves the player below this; its cost is Settings::kBloodCost.
         constexpr float kMinHealthAfterBleeding = 1.0f;
+
+        int MaxUses() { return Settings::Get(Settings::kInkwellUses); }
+
+        float BloodCost()
+        {
+            auto* health = RE::PlayerCharacter::GetSingleton()->AsActorValueOwner();
+            return health->GetPermanentActorValue(RE::ActorValue::kHealth) * Settings::Get(Settings::kBloodCost) / 100.0f;
+        }
 
         constexpr std::string_view kPlugin = "InkAndQuill.esp";
         constexpr RE::FormID kQuillsList = 0x800;    // InkAndQuillQuills
@@ -57,19 +63,22 @@ namespace InkAndQuill::WritingTools {
             return found;
         }
 
-        // The uses left in a used inkwell's name, "Inkwell (n/10)"; 0 for a full one.
+        // The uses left in a used inkwell's name, "Inkwell (n/m)", at most the current maximum (the setting may
+        // have changed since it was named); 0 for a full one.
         int UsesLeft(RE::ExtraDataList* list)
         {
             auto* text = list ? list->GetByType<RE::ExtraTextDisplayData>() : nullptr;
             if (!text || !text->IsPlayerSet()) return 0;
             const std::string_view name = text->displayName.c_str();
-            const std::string suffix = std::format("/{})", kUses);
             const auto open = name.rfind('(');
-            if (!name.ends_with(suffix) || open == std::string_view::npos) return 0;
-            const char* last = name.data() + name.size() - suffix.size();
-            int uses = 0;
-            const auto [end, error] = std::from_chars(name.data() + open + 1, last, uses);
-            return error == std::errc() && end == last && uses > 0 && uses < kUses ? uses : 0;
+            const auto slash = name.rfind('/');
+            if (!name.ends_with(")") || open == std::string_view::npos || slash == std::string_view::npos || slash < open) return 0;
+            int uses = 0, of = 0;
+            const char* end = name.data() + name.size() - 1;
+            const auto [usesEnd, usesError] = std::from_chars(name.data() + open + 1, name.data() + slash, uses);
+            const auto [ofEnd, ofError] = std::from_chars(name.data() + slash + 1, end, of);
+            if (usesError != std::errc() || ofError != std::errc() || usesEnd != name.data() + slash || ofEnd != end) return 0;
+            return uses > 0 && of > 0 ? std::min(uses, MaxUses()) : 0;
         }
 
         // An empty item extra list as the engine lays one out (CommonLib has no constructor): zeroed,
@@ -97,7 +106,7 @@ namespace InkAndQuill::WritingTools {
         // The player's emptiest inkwell, or a full one.
         Inkwell Emptiest(RE::PlayerCharacter* player)
         {
-            Inkwell used{ .uses = kUses };
+            Inkwell used{ .uses = MaxUses() + 1 };
             Inkwell full;
             auto* changes = player->GetInventoryChanges();
             if (!changes || !changes->entryList || !g_inkwells) return full;
@@ -110,11 +119,11 @@ namespace InkAndQuill::WritingTools {
                         inLists += list->GetCount();
                         const int uses = UsesLeft(list);
                         if (uses > 0 && uses < used.uses) used = { entry, list, uses };
-                        else if (uses == 0 && !full.entry) full = { entry, list, kUses };
+                        else if (uses == 0 && !full.entry) full = { entry, list, MaxUses() };
                     }
                 }
                 // Plain ones first: an extra list may carry ownership or a favourite.
-                if (Count(player, entry->object) > inLists) full = { entry, nullptr, kUses };
+                if (Count(player, entry->object) > inLists) full = { entry, nullptr, MaxUses() };
             }
             return used.entry ? used : full;
         }
@@ -145,7 +154,7 @@ namespace InkAndQuill::WritingTools {
             SKSE::log::info("[WritingTools] An inkwell ran dry");
             return Ink::RanDry;
         }
-        const std::string name = std::format("{} ({}/{})", object->GetName(), left, kUses);
+        const std::string name = std::format("{} ({}/{})", object->GetName(), left, MaxUses());
         if (inkwell.list && inkwell.list->GetCount() == 1) {
             inkwell.list->SetOverrideName(name.c_str());
         } else {
@@ -168,8 +177,7 @@ namespace InkAndQuill::WritingTools {
         auto* player = RE::PlayerCharacter::GetSingleton();
         auto* health = player ? player->AsActorValueOwner() : nullptr;
         if (!health) return false;
-        const float cost = health->GetPermanentActorValue(RE::ActorValue::kHealth) * kBloodCost;
-        return health->GetActorValue(RE::ActorValue::kHealth) - cost >= kMinHealthAfterBleeding;
+        return health->GetActorValue(RE::ActorValue::kHealth) - BloodCost() >= kMinHealthAfterBleeding;
     }
 
     bool Bleed()
@@ -179,7 +187,7 @@ namespace InkAndQuill::WritingTools {
             return false;
         }
         auto* health = RE::PlayerCharacter::GetSingleton()->AsActorValueOwner();
-        const float cost = health->GetPermanentActorValue(RE::ActorValue::kHealth) * kBloodCost;
+        const float cost = BloodCost();
         health->DamageActorValue(RE::ActorValue::kHealth, cost);
         SKSE::log::info("[WritingTools] Bled {:.0f} health", cost);
         return true;

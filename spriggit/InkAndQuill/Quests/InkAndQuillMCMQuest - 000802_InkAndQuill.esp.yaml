@@ -1,0 +1,25 @@
+FormKey: 000802:InkAndQuill.esp
+EditorID: InkAndQuillMCMQuest
+VirtualMachineAdapter:
+  Scripts:
+  - Name: InkAndQuill_MCM
+  FileName: ''
+  Aliases:
+  - Property:
+      Name: ''
+      Object: 000802:InkAndQuill.esp
+      Alias: 0
+    Scripts:
+    - Name: SKI_PlayerLoadGameAlias
+Name:
+  TargetLanguage: English
+  Value: Ink & Quill MCM
+Flags:
+- StartGameEnabled
+- 0x10
+NextAliasID: 1
+Aliases:
+- Name: PlayerAlias
+  Flags: []
+  ForcedReference: 000014:Skyrim.esm
+  VoiceTypes: Null

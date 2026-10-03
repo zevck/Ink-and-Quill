@@ -19,17 +19,39 @@
 
 #pragma once
 
-// SKSE/Plugins/InkAndQuill.ini, read once at kDataLoaded; a missing file or key is its default.
-// See docs/EDITOR.md#keys.
+// SKSE/Plugins/InkAndQuill.ini: every setting an integer, clamped, read at kDataLoaded and changed by the MCM
+// (written back at once).  A missing file or key is its default.  See docs/SETTINGS.md.
 namespace InkAndQuill::Settings {
+
+    struct Setting {
+        const char* section;
+        const char* key;
+        int defaultValue;
+        int min;
+        int max;
+    };
+
+    // A DirectX scan code, not a key that types: while writing it can't also type.
+    inline constexpr Setting kEditKey{ "Keys", "Edit", 61, 1, 255 };      // F3: start writing; save and read again
+    inline constexpr Setting kInkwellUses{ "Writing", "InkwellUses", 10, 1, 100 };  // saves a full inkwell lasts
+    inline constexpr Setting kBloodCost{ "Writing", "BloodCost", 10, 1, 100 };      // % of maximum health per save
+    inline constexpr Setting kBlood{ "Writing", "Blood", 1, 0, 1 };                 // offered when there's no ink
+    inline constexpr Setting kRequireQuillAndInk{ "Writing", "RequireQuillAndInk", 1, 0, 1 };  // 0: writing is free
+    inline constexpr Setting kLayoutTest{ "Debug", "LayoutTest", 0, 0, 1 };  // development only (LayoutTest.h)
+
+    inline constexpr const Setting* kAll[] = { &kEditKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kLayoutTest };
 
     void Load();
 
-    // DirectX scan codes.  Neither may be a key that types: while writing it can't also type.
-    std::uint32_t EditKey();    // [Keys] Edit: start writing in the open book; save and read again (61 = F3)
-    std::uint32_t RemoveKey();  // [Keys] Remove: tear out the entry under the caret (68 = F10)
+    // "Section.Key" (any case: a Papyrus string may come back in another), or nullptr.
+    const Setting* Find(std::string_view name);
 
-    // [Debug] LayoutTest = 1: every book can be written in, nothing kept (LayoutTest.h).
-    bool LayoutTest();
+    int Get(const Setting& setting);
+
+    // Clamped, kept and written to the INI.
+    void Set(const Setting& setting, int value);
+
+    inline std::uint32_t EditKey() { return static_cast<std::uint32_t>(Get(kEditKey)); }
+    inline bool LayoutTest() { return Get(kLayoutTest) != 0; }
 
 }

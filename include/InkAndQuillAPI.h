@@ -44,9 +44,8 @@
 extern "C" {
 #endif
 
-/* Answers given from inside a callback, through IQ_API::ReplySave and IQ_API::ReplyText. */
+/* The answer to a save, given from inside onSave through IQ_API::ReplySave or ReplySaveAsBook. */
 typedef struct IQ_SaveReply IQ_SaveReply;
-typedef struct IQ_TextReply IQ_TextReply;
 
 typedef enum IQ_Ink
 {
@@ -65,17 +64,11 @@ typedef struct IQ_Session
     int32_t caretRun;        /* the run the caret starts at the end of; -1: the page being read */
     void* user;
 
-    /* Required.  The runs in order.  Answer with ReplySave: accepted (ink or blood is charged; readingText is
-       the book's text to read again, NULL or "" closes the book) or refused (message shown, nothing charged).
-       No answer is a refusal. */
+    /* Required.  The runs in order; answer with ReplySave (accepted with the reading text, or refused with a message).
+       No answer is a refusal.  docs/API.md#saving */
     void (*onSave)(void* user, const char* const* runs, int32_t count, IQ_SaveReply* reply);
     /* Optional.  The player discarded their changes. */
     void (*onDiscard)(void* user);
-    /* Optional.  The remove key on a run: answer with ReplyText (the question to ask); no answer: nothing to
-       remove there.  NULL: the remove key does nothing. */
-    void (*removePrompt)(void* user, int32_t run, IQ_TextReply* reply);
-    /* Optional.  The player confirmed: remove it now (CurrentRuns, render without it, Reload). */
-    void (*onRemove)(void* user, int32_t run);
     /* Optional.  The session is over (closed, discarded, never started, a load): once, always last. */
     void (*onEnd)(void* user);
 } IQ_Session;
@@ -85,6 +78,9 @@ typedef struct IQ_Session
 typedef bool (*IQ_Owner)(void* user, uint32_t bookFormId);
 
 typedef void (*IQ_RunVisitor)(void* user, int32_t index, const char* text);
+
+/* A client prompt's answer: the button's index, once the prompt has closed and the keys are the editor's again. */
+typedef void (*IQ_PromptDone)(void* user, int32_t button);
 
 typedef struct IQ_API
 {
@@ -100,20 +96,20 @@ typedef struct IQ_API
     /* Owners are asked in the order they were added.  Add at kDataLoaded or later. */
     bool (*AddOwner)(IQ_Owner owner, void* user);
 
-    /* The open book: checks the quill and ink (or offers blood), then writing.  False: not started (writing off,
-       already writing, a prompt open, an invalid session); onEnd has run. */
+    /* The open book: quill and ink checked (or blood offered), then writing.  False: not started, and onEnd has
+       run.  docs/API.md#starting */
     bool (*BeginSession)(const IQ_Session* session);
     /* As BeginSession, once bookFormId's book menu is open and has its text.  The client opens the menu. */
     bool (*BeginSessionOnOpen)(uint32_t bookFormId, const IQ_Session* session);
 
     /* While writing: the runs as the player has them, unsaved text included.  Returns the count, or -1. */
     int32_t (*CurrentRuns)(IQ_RunVisitor visit, void* user);
-    /* While writing: the text rendered again.  from[i] is the run new run i was before (-1: new), count the new
-       run count; the caret goes to caretRun at caretOffset (-1: its end). */
-    bool (*Reload)(const char* markedText, const int32_t* from, int32_t count, int32_t caretRun, int32_t caretOffset);
+    /* While writing: the text rendered again (marked, and as it now reads); from[i] is the run new run i was (-1: new),
+       count the new runs'.  The caret goes to caretRun at caretOffset (-1: its end). */
+    bool (*Reload)(const char* markedText, const char* readingText, const int32_t* from, int32_t count, int32_t caretRun,
+                   int32_t caretOffset);
 
     void (*ReplySave)(IQ_SaveReply* reply, bool accepted, const char* message, const char* readingText);
-    void (*ReplyText)(IQ_TextReply* reply, const char* text);
 
     /* Writing materials, for a client with its own writing UI. */
     bool (*HasQuill)(void);
@@ -122,16 +118,32 @@ typedef struct IQ_API
     bool (*CanBleed)(void);
     bool (*Bleed)(void);
 
-    /* Blanks: reading blankFormId from the player's own inventory (or the edit key on it there) calls onOpen.
-       The client chooses when it becomes its book: now (ReplaceBlank, then BeginSession or not), or on the first
-       save (BeginSession, then ReplySaveAsBook).  Add at kDataLoaded or later. */
+    /* Reading blankFormId from the player's inventory calls onOpen; the client replaces it now (ReplaceBlank) or
+       on its first save (ReplySaveAsBook).  docs/API.md#blanks */
     bool (*RegisterBlank)(uint32_t blankFormId, IQ_Owner onOpen, void* user);
-    /* A blank's save, accepted: the client's new book replaces it (one blank is removed, the open menu shows
-       bookFormId from now on).  readingText as ReplySave's. */
+    /* A blank's save, accepted: one blank is removed and the open menu shows bookFormId. */
     void (*ReplySaveAsBook)(IQ_SaveReply* reply, uint32_t bookFormId, const char* readingText);
-    /* A blank open from the inventory and not being written in (in onOpen, typically): replace it now with
-       bookFormId, shown from its first page with readingText.  A session begun after it is that book's. */
+    /* In onOpen: the blank is replaced now by bookFormId, shown with readingText; a session begun after is the
+       book's. */
     bool (*ReplaceBlank)(uint32_t bookFormId, const char* readingText);
+
+    /* Optional: the name Ink & Quill's MCM lists the calling mod under (else its DLL's file name). */
+    void (*SetClientName)(const char* name);
+
+    /* A session begun now would be in blood (unless the player declines): for a new heading before BeginSession.
+       InBlood once it has begun. */
+    bool (*WouldBeInBlood)(void);
+
+    /* While writing, the calling client's own keys still reach the game: this set replaces its last.  Keys that type
+       or edit, and the edit key, are refused; returns how many were kept.  docs/API.md#clients-keys */
+    int32_t (*RegisterKeys)(const uint32_t* keyCodes, int32_t count);
+
+    /* While writing: the run the caret is in, or -1 (not writing, or the caret is in no run). */
+    int32_t (*CaretRun)(void);
+    /* While writing: a message box over the book; done once it has closed, never if the session ended first.
+       False: not writing, a prompt open, or no buttons.  docs/API.md#asking-the-player */
+    bool (*Prompt)(const char* text, const char* const* buttons, int32_t count, int32_t cancelButton, IQ_PromptDone done,
+                   void* user);
 } IQ_API;
 
 /* Exported by InkAndQuill.dll as "IQ_GetAPI". */

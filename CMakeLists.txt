@@ -29,8 +29,11 @@ include(lib/commonlibsse-ng/cmake/CommonLibSSE.cmake)
 set(sources
     src/main.cpp
     src/API.cpp
+    src/Clients.cpp
     src/Editor.cpp
+    src/Keys.cpp
     src/LayoutTest.cpp
+    src/Papyrus.cpp
     src/Settings.cpp
     src/Strings.cpp
     src/WritingMode.cpp

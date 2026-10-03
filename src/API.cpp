@@ -21,6 +21,7 @@
 
 #include "InkAndQuillAPI.h"
 
+#include "Clients.h"
 #include "Editor.h"
 #include "WritingMode.h"
 #include "WritingTools.h"
@@ -30,9 +31,6 @@ struct IQ_SaveReply {
     bool answered = false;
 };
 
-struct IQ_TextReply {
-    std::string text;
-};
 
 namespace {
     using namespace InkAndQuill;
@@ -68,19 +66,6 @@ namespace {
             return reply.saved;
         };
         if (c.onDiscard) client.onDiscard = [c]() { c.onDiscard(c.user); };
-        if (c.removePrompt) {
-            client.removePrompt = [c](std::size_t run) {
-                IQ_TextReply reply;
-                c.removePrompt(c.user, static_cast<std::int32_t>(run), &reply);
-                return reply.text;
-            };
-        }
-        if (c.onRemove) {
-            client.onRemove = [c](std::size_t run) {
-                c.onRemove(c.user, static_cast<std::int32_t>(run));
-                return std::string();
-            };
-        }
         if (c.onEnd) client.onEnd = [c]() { c.onEnd(c.user); };
         return session;
     }
@@ -88,9 +73,39 @@ namespace {
     bool IsWritingOn() { return WritingMode::IsOn(); }
     bool IsWriting() { return Editor::IsWriting(); }
     bool InBlood() { return Editor::InBlood(); }
+    bool WouldBeInBlood() { return Editor::WouldBeInBlood(); }
+    std::int32_t RegisterKeys(const std::uint32_t* codes, std::int32_t count)
+    {
+        try {
+            const void* client = Clients::Note(_ReturnAddress());
+            std::vector<std::uint32_t> keys;
+            if (codes && count > 0) keys.assign(codes, codes + count);
+            return Editor::SetClientKeys(client, keys);
+        } catch (const std::exception& e) {
+            SKSE::log::error("[API] RegisterKeys: {}", e.what());
+            return 0;
+        }
+    }
+    std::int32_t CaretRun() { return Editor::CaretRun(); }
+
+    bool Prompt(const char* text, const char* const* buttons, std::int32_t count, std::int32_t cancelButton,
+                IQ_PromptDone done, void* user)
+    {
+        try {
+            std::vector<std::string> labels;
+            for (std::int32_t i = 0; buttons && i < count; ++i) labels.push_back(Copy(buttons[i]));
+            std::function<void(int)> answer;
+            if (done) answer = [done, user](int button) { done(user, button); };
+            return Editor::Prompt(Copy(text), labels, cancelButton, std::move(answer));
+        } catch (const std::exception& e) {
+            SKSE::log::error("[API] Prompt: {}", e.what());
+            return false;
+        }
+    }
 
     bool AddOwner(IQ_Owner owner, void* user)
     {
+        Clients::Note(_ReturnAddress());
         if (!owner) return false;
         Editor::AddOwner([owner, user](RE::TESObjectBOOK* book) { return owner(user, book->GetFormID()); });
         return true;
@@ -126,12 +141,13 @@ namespace {
         return static_cast<std::int32_t>(runs->size());
     }
 
-    bool Reload(const char* marked, const std::int32_t* from, std::int32_t count, std::int32_t caretRun, std::int32_t caretOffset)
+    bool Reload(const char* marked, const char* readingText, const std::int32_t* from, std::int32_t count, std::int32_t caretRun,
+                std::int32_t caretOffset)
     {
         try {
             std::vector<int> origins;
             if (from && count > 0) origins.assign(from, from + count);
-            return Editor::Reload(Copy(marked), origins, caretRun, caretOffset);
+            return Editor::Reload(Copy(marked), Copy(readingText), origins, caretRun, caretOffset);
         } catch (const std::exception& e) {
             SKSE::log::error("[API] Reload: {}", e.what());
             return false;
@@ -143,11 +159,6 @@ namespace {
         if (!reply) return;
         reply->saved = { accepted, Copy(message), Copy(readingText), 0 };
         reply->answered = true;
-    }
-
-    void ReplyText(IQ_TextReply* reply, const char* text)
-    {
-        if (reply) reply->text = Copy(text);
     }
 
     bool HasQuill() { return WritingTools::HasQuill(); }
@@ -167,6 +178,7 @@ namespace {
 
     bool RegisterBlank(std::uint32_t blank, IQ_Owner onOpen, void* user)
     {
+        Clients::Note(_ReturnAddress());
         if (!onOpen || blank == 0) return false;
         Editor::RegisterBlank(blank, [onOpen, user](RE::TESObjectBOOK* book) { return onOpen(user, book->GetFormID()); });
         return true;
@@ -180,6 +192,8 @@ namespace {
     }
 
     bool ReplaceBlank(std::uint32_t book, const char* readingText) { return Editor::ReplaceOpenBlank(book, Copy(readingText)); }
+
+    void SetClientName(const char* name) { Clients::Name(_ReturnAddress(), Copy(name)); }
 
     bool CanBleed() { return WritingTools::CanBleed(); }
     bool Bleed() { return WritingTools::Bleed(); }
@@ -196,7 +210,6 @@ namespace {
         .CurrentRuns = CurrentRuns,
         .Reload = Reload,
         .ReplySave = ReplySave,
-        .ReplyText = ReplyText,
         .HasQuill = HasQuill,
         .HasInk = HasInk,
         .UseInk = UseInk,
@@ -205,11 +218,17 @@ namespace {
         .RegisterBlank = RegisterBlank,
         .ReplySaveAsBook = ReplySaveAsBook,
         .ReplaceBlank = ReplaceBlank,
+        .SetClientName = SetClientName,
+        .WouldBeInBlood = WouldBeInBlood,
+        .RegisterKeys = RegisterKeys,
+        .CaretRun = CaretRun,
+        .Prompt = Prompt,
     };
 }
 
 extern "C" __declspec(dllexport) const IQ_API* IQ_GetAPI(std::uint32_t version)
 {
+    InkAndQuill::Clients::Note(_ReturnAddress());
     if (version > IQ_API_VERSION) {
         SKSE::log::warn("[API] A client wants API version {}; this is {}", version, IQ_API_VERSION);
         return nullptr;

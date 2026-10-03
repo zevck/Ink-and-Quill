@@ -26,31 +26,50 @@ namespace InkAndQuill::Settings {
     namespace {
         constexpr auto kPath = "Data/SKSE/Plugins/InkAndQuill.ini";
 
-        std::uint32_t g_editKey = 61;
-        std::uint32_t g_removeKey = 68;
-        bool g_layoutTest = false;
+        // Values by kAll index: read on the main thread, set from the MCM's natives.
+        std::array<std::atomic<int>, std::size(kAll)> g_values;
 
-        std::uint32_t ReadKey(const char* key, std::uint32_t fallback)
+        std::size_t IndexOf(const Setting& setting)
         {
-            const auto path = std::filesystem::absolute(kPath).string();
-            const auto value = GetPrivateProfileIntA("Keys", key, static_cast<int>(fallback), path.c_str());
-            return value >= 1 && value <= 255 ? static_cast<std::uint32_t>(value) : fallback;
+            for (std::size_t i = 0; i < std::size(kAll); ++i) {
+                if (kAll[i] == &setting) return i;
+            }
+            return 0;
         }
+
+        std::string Path() { return std::filesystem::absolute(kPath).string(); }
     }
 
     void Load()
     {
-        g_editKey = ReadKey("Edit", 61);
-        g_removeKey = ReadKey("Remove", 68);
-        const auto path = std::filesystem::absolute(kPath).string();
-        g_layoutTest = GetPrivateProfileIntA("Debug", "LayoutTest", 0, path.c_str()) == 1;
-        SKSE::log::info("[Settings] Edit key 0x{:X}, remove key 0x{:X}", g_editKey, g_removeKey);
+        const auto path = Path();
+        for (std::size_t i = 0; i < std::size(kAll); ++i) {
+            const auto& s = *kAll[i];
+            g_values[i] = std::clamp(static_cast<int>(GetPrivateProfileIntA(s.section, s.key, s.defaultValue, path.c_str())), s.min, s.max);
+        }
+        SKSE::log::info("[Settings] Edit key 0x{:X}, inkwell uses {}, blood {} ({}%), quill and ink {}",
+                        EditKey(), Get(kInkwellUses), Get(kBlood) ? "on" : "off", Get(kBloodCost),
+                        Get(kRequireQuillAndInk) ? "required" : "not required");
     }
 
-    std::uint32_t EditKey() { return g_editKey; }
+    const Setting* Find(std::string_view name)
+    {
+        for (const auto* s : kAll) {
+            if (_stricmp(std::string(name).c_str(), std::format("{}.{}", s->section, s->key).c_str()) == 0) return s;
+        }
+        return nullptr;
+    }
 
-    std::uint32_t RemoveKey() { return g_removeKey; }
+    int Get(const Setting& setting) { return g_values[IndexOf(setting)]; }
 
-    bool LayoutTest() { return g_layoutTest; }
+    void Set(const Setting& setting, int value)
+    {
+        value = std::clamp(value, setting.min, setting.max);
+        g_values[IndexOf(setting)] = value;
+        if (!WritePrivateProfileStringA(setting.section, setting.key, std::to_string(value).c_str(), Path().c_str())) {
+            SKSE::log::error("[Settings] Couldn't write {}.{} to {}", setting.section, setting.key, kPath);
+        }
+        SKSE::log::info("[Settings] {}.{} = {}", setting.section, setting.key, value);
+    }
 
 }

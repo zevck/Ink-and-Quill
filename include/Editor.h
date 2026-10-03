@@ -30,20 +30,9 @@ namespace InkAndQuill::Editor {
     inline constexpr std::string_view kLockOpen = "\xEE\x80\x82";
     inline constexpr std::string_view kLockClose = "\xEE\x80\x83";
 
-    // One entry: a heading the player can't change (may be empty) and its text.
-    struct Entry {
-        std::string heading;
-        std::string body;
-    };
-
+    // Marked text (docs/EDITOR.md#marked-text): the book's text as reading shows it, locks marked.  The runs between
+    // locks are what the player writes, in order.
     struct Document {
-        std::string font = "$HandwrittenFont";
-        int titleSize = 18, smallSize = 12, dateSize = 16, contentSize = 14;
-        std::string title;  // the title page
-        std::string dates;  // under the title
-        std::vector<Entry> entries;
-        // Marked text, used instead of the above when set (docs/EDITOR.md#marked-text): the book's text as reading
-        // shows it, locks marked.  The runs between locks are the bodies, in order.
         std::string marked;
         std::string runFont;  // optional: the format typed text takes, paragraph breaks at the page's size
         int runSize = 0;
@@ -61,13 +50,6 @@ namespace InkAndQuill::Editor {
     struct Client {
         std::function<Saved(const std::vector<std::string>& bodies)> onSave;  // the bodies in page order
         std::function<void()> onDiscard;
-        // A new entry's heading, or nullopt if there's no room (the client says why).  Unset: no new entries.
-        std::function<std::optional<std::string>()> newEntry;
-        // The remove key on entry (run) i: the prompt's question; empty: nothing to remove there.  Unset: no removing.
-        std::function<std::string(std::size_t)> removePrompt;
-        // Entry i is to go (now, not on save).  Entries: the title page's dates after it.  Marked text: the client
-        // removes it itself (CurrentRuns, render, Reload); the result is unused.
-        std::function<std::string(std::size_t)> onRemove;
         // The session is over (saved and closed, discarded, refused to start, a load): once, always last.
         std::function<void()> onEnd;
     };
@@ -75,8 +57,7 @@ namespace InkAndQuill::Editor {
     struct Session {
         Document document;
         Client client;
-        bool startNewEntry = false;  // entries: begin in a new entry
-        int caretRun = -1;           // marked text: begin at the end of this run (-1: the page being read)
+        int caretRun = -1;  // begin at the end of this run (-1: the page being read)
     };
 
     // The edit key in an open book asks each owner in turn; one that owns the book calls Begin and returns true.
@@ -95,27 +76,45 @@ namespace InkAndQuill::Editor {
     // now (writing off, already writing, a prompt open); the session's onEnd has run.
     bool Begin(Session session);
 
-    // Marked text, while writing: the runs as the player has them now, unsaved text included.
+    // While writing: the runs as the player has them now, unsaved text included.
     std::optional<std::vector<std::string>> CurrentRuns();
 
-    // Marked text, while writing: the client's text rendered again (a new entry, a tear-out).  from[i]: which
+    // While writing: the client's text rendered again (a new entry, a tear-out).  from[i]: which
     // run before the reload new run i was (-1: a new one), so unsaved changes are still known as such.
-    // The caret goes to caretRun at caretOffset (-1: its end).  False: not writing marked text.
-    bool Reload(std::string marked, const std::vector<int>& from, int caretRun, int caretOffset);
+    // The caret goes to caretRun at caretOffset (-1: its end).  False: not writing.
+    // readingText: the book's text as it now reads, shown if the edit key goes back to reading with nothing to save.
+    bool Reload(std::string marked, const std::string& readingText, const std::vector<int>& from, int caretRun,
+                int caretOffset);
 
     // Begin once this book's menu is open and has its text (its SetBookText comes after the menu opens).
     // The client opens the menu.  False as Begin.
     bool BeginOnOpen(RE::FormID book, Session session);
 
-    // While writing: a new entry at the end, caret in it (a client's own key).
-    void AppendEntry();
-
     // The player is writing, and in blood.
     bool IsWriting();
     bool InBlood();
 
+    // A session begun now would be in blood, unless the player declines (quill and ink required, blood on, no ink):
+    // for a client choosing a new entry's heading before it begins.
+    bool WouldBeInBlood();
+
+    // While writing: the run the caret is in, or -1.
+    int CaretRun();
+
+    // While writing: a client's message box over the book, keys its own until it closes.  done(button) once it has,
+    // if the same session is still writing (never after its onEnd).  False: not writing, or a prompt is open.
+    bool Prompt(const std::string& text, const std::vector<std::string>& buttons, int cancelButton,
+                std::function<void(int)> done);
+
+    // While writing, every keyboard event is taken from the game but clients' own keys (a new entry): this client's
+    // set, replacing its last.  Keys that type or edit, and the edit key, are refused.  Returns how many were kept.
+    int SetClientKeys(const void* client, const std::vector<std::uint32_t>& codes);
+
     // Once, at kDataLoaded: the book-menu and keyboard sinks and the menu hooks.
     void Register();
+
+    // At the first kPostLoadGame or kNewGame (after Wheeler hooks the same call at kDataLoaded): the input dispatch hook.
+    void InstallInputHook();
 
     // A load or new game: drop the session.
     void Reset();

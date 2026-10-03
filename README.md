@@ -8,7 +8,7 @@ The planned API: [docs/API_DESIGN.md](docs/API_DESIGN.md).
 
 ## Requirements
 
-SKSE, Address Library for SKSE Plugins.
+SKSE, Address Library for SKSE Plugins. Optional: SkyUI, for the MCM (without it, the settings are in `SKSE\Plugins\InkAndQuill.ini`).
 
 ## License
 
