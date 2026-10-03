@@ -1,6 +1,6 @@
 # Ink & Quill
 
-SKSE plugin (CommonLibSSE-NG, C++23; one DLL for SE and AE): "Ink & Quill - Writing Framework". The player writes in books in the book menu; Ink & Quill owns `book.swf`, the editor, quills, inkwells and writing in blood, and its **clients** (SkyrimNet Physical Diaries, Physical Letters, Papyrus mods) store the text and give it meaning. It must not depend on SkyrimNet. VR isn't a target.
+SKSE plugin (CommonLibSSE-NG, C++23; one DLL for SE and AE): "Ink & Quill - Writing Framework". The player writes in books in the book menu; Ink & Quill owns `book.swf`, the editor, quills, inkwells and writing in blood, and its **clients** (SkyrimNet Physical Diaries, Physical Letters, other SKSE plugins) store the text and give it meaning. It must not depend on SkyrimNet. VR isn't a target.
 
 **Developer docs: [docs/INDEX.md](docs/INDEX.md).** The planned API is [docs/API_DESIGN.md](docs/API_DESIGN.md). The docs are the source of truth for how the code works. Keep them current: a change that makes a doc wrong fixes the doc in the same change.
 

@@ -20,8 +20,41 @@
 #include "Keys.h"
 
 #include <Windows.h>
+#include <chrono>
 
 namespace InkAndQuill::Keys {
+
+    namespace {
+        // Held-key repeat (input thread only).
+        constexpr auto kRepeatDelay = std::chrono::milliseconds(400);
+        constexpr auto kRepeatRate = std::chrono::milliseconds(50);
+        std::uint32_t g_lastCode = 0;
+        std::chrono::steady_clock::time_point g_lastTime{};
+        bool g_repeating = false;
+    }
+
+    bool ShouldRepeat(const RE::ButtonEvent* button, std::uint32_t code)
+    {
+        if (button->IsUp()) {
+            if (code == g_lastCode) {
+                g_lastCode = 0;
+                g_repeating = false;
+            }
+            return false;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (button->IsDown()) {
+            g_lastCode = code;
+            g_lastTime = now;
+            g_repeating = false;
+            return true;
+        }
+        if (!button->IsHeld() || code != g_lastCode) return false;
+        if (now - g_lastTime < (g_repeating ? kRepeatRate : kRepeatDelay)) return false;
+        g_repeating = true;
+        g_lastTime = now;
+        return true;
+    }
 
     bool IsModifier(std::uint32_t code) { return std::ranges::find(kModifiers, code) != std::end(kModifiers); }
 

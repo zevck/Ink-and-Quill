@@ -1,6 +1,6 @@
 # The editor
 
-The player writes in the open book in the book menu. Code: `Editor`, `WritingMode`, `WritingTools`, `Settings`, `Strings`, and `book.swf` (`swf/book`). Copied from SkyrimNet Physical Diaries' `BookEditor` (its docs/EDITING.md has the history) and made client-neutral: diary journals, SkyrimNet writes and blank journals stay there. The public API ([API_DESIGN.md](API_DESIGN.md)) isn't built yet; clients reach the editor through the internal `Editor::AddOwner` / `Editor::Begin`.
+The player writes in the open book in the book menu. Code: `Editor`, `Keys` (the editor's keys, held-key repeat, which keys may be bound), `Clipboard` (paste and copy), `WritingMode`, `WritingTools`, `Settings`, `Strings`, and `book.swf` (`swf/book`). Copied from SkyrimNet Physical Diaries' `BookEditor` (its docs/EDITING.md has the history) and made client-neutral: diary journals, SkyrimNet writes and blank journals stay there. Clients reach it through the C API ([API.md](API.md)), built on the internal `Editor` calls.
 
 ## Writing mode
 
@@ -8,7 +8,7 @@ Writing is on when **Ink & Quill's `book.swf` is the one the game loads**. `Writ
 
 - It reads `Data\Interface\book.swf`, the file the game sees (under MO2, the winning loose file; a loose file beats every BSA). No file: off.
 - The SWF ships **uncompressed** (`FWS`; the build runs `ffdec-cli -decompress` and fails if the output isn't uncompressed with the marker, see [DEVELOPMENT.md](DEVELOPMENT.md)), so `BookMenu.as`'s marker `BOOKMENU_WRITING_INTERFACE=<n>` is plain text in the file. A compressed file or one without the marker is another mod's: off.
-- `<n>` only goes up: bump it when a call is added. The plugin needs at least `kMinInterface` (`WritingMode.cpp`, now 4: `SetEditMarked`); an older SWF is logged as an error and writing is off. The marker's name is the one Physical Diaries' SWF uses: its SWF (3) is too old for Ink & Quill, while Physical Diaries accepts Ink & Quill's (it keeps every older call). So while both ship `book.swf`, Ink & Quill's must win the file conflict.
+- `<n>` only goes up: bump it when a call is added. The plugin needs at least `kMinInterface` (`WritingMode.cpp`, now 4: `SetEditMarked`); an older SWF is logged as an error and writing is off. The marker's name is the one Physical Diaries' SWF used, before Ink & Quill took the editor over; Ink & Quill is now the only mod shipping `book.swf`. An older copy left over from Physical Diaries (interface 3) is refused as too old.
 
 Only with writing on does `Editor::Register` install the input sink, the menu sink and the two book menu hooks. The log says which (`[WritingMode] On` / `Off: <why>`).
 
@@ -52,6 +52,16 @@ The design is in [API_DESIGN.md](API_DESIGN.md#marked-text-agreed-2026-10-02): t
 - **Session end:** `EndSession` drops the session and calls the client's `onEnd`, once, on every way out (closed, discarded, no quill, blood declined, the menu closed before a `BeginOnOpen` began, a load).
 - **Edits stay in one run**: typing inserts at the caret, Backspace and Delete stop at a run's ends, and a selection is never replaced (the caret is its start), so locked text can't be changed through a selection.
 
+## Headings
+
+A line that starts with `# ` is a heading, `## ` a smaller one (no small text: `###` is a heading in markdown, as SkyrimNet's dashboard shows diaries, so it stays plain text here): no markup, no markers, the text keeps the `# ` as typed (a client stores it as it is: plain markdown). The SWF applies it to **every book**, for every client, with no opt-in or opt-out (decided 2026-10-03: nothing needs a literal `# ` line; add a session opt-out if a client ever does):
+
+- **Reading** (`SetBookText`, so also `ReturnToReading` and `ReplaceBookText`): once the HTML is in the field and before pagination, `ReadHeadings` takes each line's mark out and enlarges the line by `HEADING_SCALE` (1.5 for `#`, 1.25 for `##`) of the size it had, from the last line up. It works on the laid-out text, so it doesn't matter what tags the line sits in; a vanilla book with a line starting `# ` gets a heading too.
+- **Writing** (`StyleHeadings`, from `EditBuildMarked` and after every edit through `FormatBreaks`): the mark stays in the field (it's text the player can delete) at size 1, and the rest of the line is the run's base size (the client's hint, else the run's first character as loaded) times the same scale. Without a hint, the run's other lines are set back to its base size on each pass (with one, `FormatBreaks` resets them). A run starting mid-line, after locked text, has no line start there. Locked text's headings are styled once as loaded (`StyleLockedHeadings`, each from its own size), so the editor shows what reading shows. Typing `# ` at a line's start makes it a heading at once; deleting the mark (two Backspaces: the caret doesn't skip it yet) makes it plain again.
+- Pages: the reading and the editing text differ by the marks, so `EditCheckLayout` reports it can't compare them.
+
+Checked in game (AE, 2026-10-03): headings appear while typing and when reading, and deleting the mark returns the line to its normal size (with a client's format hint).
+
 ## The layout test
 
 Development only, to check marked text in game before the API is built. With `[Debug] LayoutTest = 1` in `InkAndQuill.ini`, `LayoutTest` owns **every book**: the edit key opens its own reading text as marked text: `TESDescription::GetDescription` with no parent, as the book menu asks (Physical Diaries' hook gives any other caller its text without font tags). English text only: for Cyrillic, Physical Diaries' hook returns Win-1251, which the SWF would read as UTF-8.
@@ -61,8 +71,6 @@ Development only, to check marked text in game before the API is built. With `[D
 - **On entering**, the log says the run count and the result of `EditCheckLayout`: each editing page's first character against the reading view's (`ok (…)`, or the pages that differ). **On save** each run is logged and the save is refused with a notice: nothing is kept or charged.
 
 Passed on AE (2026-10-02) on a Physical Diaries journal, after two fixes found by it (the heading lock, the page break showing above a page). What it checks: the check says ok; the page being read is the page edited; typing, Enter, Backspace and Delete keep the fonts, sizes and alignment, in a journal entry and a vanilla book; blood text is red; saving and reading again shows the same pages.
-
-Physical Diaries' own edit key (F3) also acts on its journals, so the dev INI moves Ink & Quill's to F4 (`[Keys] Edit = 62`).
 
 ## Blanks
 
@@ -85,9 +93,9 @@ While the player writes, **every keyboard event is Ink & Quill's**: it reads the
 - **Not writing, a book open:** only the edit key is taken out (it begins writing); the book-menu state comes from the menu sink (`g_bookOpen`), not from asking the UI on the input thread.
 - **While a prompt is open** (Ink & Quill's own, or a client's through `Prompt`), nothing is taken: the message box gets its keys. A client's prompt answers through `ClientPromptCallback`, after `EndPrompt`, only to the session that asked (`g_sessionSerial`, bumped as each session ends).
 
-Both layers run on the thread input arrives on: the main thread while a menu pauses the game, the "Poll controls" job during play (Skyrim Souls RE unpauses the book menu). So they only read and unlink events; the work is a **UI task**: typing, caret moves, the edit key's save. SKSE runs UI tasks in `UIManager::ProcessCommands`, right after the UI processes its message queue (SKSE's `Hooks_UI.cpp`), where the book menu gets its messages and the close hook runs: so the SWF calls, the client's callbacks, ink and blood and the session state stay on the UI's thread. Each task checks the session is still writing (the edit key's begin: that the book is still open and nothing began), and catches exceptions (`QueueUI`). Held-key repeat is worked out at once; the characters for a key in the task (`GetKeyboardState`, `ToUnicode`): Windows keeps keyboard state per thread, the window's thread being the one that sees Shift and dead keys.
+Both layers run on the thread input arrives on: the main thread while a menu pauses the game, the "Poll controls" job during play (Skyrim Souls RE unpauses the book menu). So they only read and unlink events; the work is a **UI task**: typing, caret moves, the edit key's save. SKSE runs UI tasks in `UIManager::ProcessCommands`, right after the UI processes its message queue (SKSE's `Hooks_UI.cpp`), where the book menu gets its messages and the close hook runs: so the SWF calls, the client's callbacks, ink and blood and the session state stay on the UI's thread. Each task checks the session is still writing (the edit key's begin: that the book is still open and nothing began), and catches exceptions (`QueueUI`). Held-key repeat is worked out at once (`Keys::ShouldRepeat`: 400 ms, then every 50 ms); the characters for a key in the task (`GetKeyboardState`, `ToUnicode`): Windows keeps keyboard state per thread, the window's thread being the one that sees Shift and dead keys.
 
-Keys become text with the active layout (`ToUnicode`, dead keys, held-key repeat). Arrows, Home and End move the caret; Backspace, Delete and Enter edit (an erase only where `EditCanErase` says there's something); Escape asks the menu to close. The edit key saves and reads again.
+Keys become text with the active layout (`ToUnicode`, dead keys, held-key repeat). Arrows, Home and End move the caret; Backspace, Delete and Enter edit (an erase only where `EditCanErase` says there's something); Escape asks the menu to close. The edit key saves and reads again. **Ctrl+V** pastes the Windows clipboard's text at the caret, as if typed (`Clipboard::ReadForTyping`: line breaks kept, tabs as spaces, other control characters and every private-use character dropped, so a paste can't carry blood or lock markers; at most 20000 characters). **Ctrl+C** copies the whole run the caret is in (`Clipboard::Write`, without markers; `Copied` notice): a client's entry, or the whole text where it locks nothing. There's no selection, so no copying part of a run, and no cut. Paste and copy ran on AE (2026-10-03), headings included. Ctrl with Alt (AltGr) types as usual.
 
 ## Saving
 
@@ -107,8 +115,7 @@ The editor's text can't be read: `SaveFailed`, and writing goes on, so nothing i
 
 ## Not done yet
 
-- **The API**: version 1 is built ([API.md](API.md)); Physical Diaries uses its sessions (AE) and blanks (untested); Papyrus isn't built. Physical Letters doesn't use Ink & Quill yet.
-- **Nothing here has run in game.** Above all the renamed inkwells: the hand-made extra list on SE and AE, the name surviving save and load, dropping, containers and merchants, and SkyUI showing it.
+- **The API**: version 1 is built ([API.md](API.md)); Physical Diaries uses its sessions, blanks, keys and prompts (AE). Physical Letters doesn't use Ink & Quill yet. No Papyrus API is planned ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
+- **Renamed inkwells** ran on AE: the hand-made extra list works and the name survives save and load (2026-10-03). Not tested: dropping and picking up, containers, selling and buying back, SkyUI showing the name, SE.
 - **Translations** beyond English (the editor's strings and the MCM's).
 - **Input blocking and unpaused writing** ran on AE (2026-10-03): every mod's hotkeys blocked but those that poll the keyboard. Not tested: VR's dispatch offset, a mod hooking the same dispatch call after Ink & Quill, and clients' registered keys (`RegisterKeys`).
-- **Both mods ship `book.swf`** until Physical Diaries drops its copy; MO2's order picks one, and either works (same marker).

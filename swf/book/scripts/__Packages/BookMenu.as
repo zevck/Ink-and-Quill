@@ -27,6 +27,8 @@ class BookMenu extends MovieClip
    static var LOCK_OPEN = 0xE002;
    static var LOCK_CLOSE = 0xE003;
    static var PAGE_BREAK_TAG = "[pagebreak]";
+   // Headings: a line starting "# " or "## " is enlarged by these, its mark taken out (reading) or shrunk (writing).
+   static var HEADING_SCALE = [1, 1.5, 1.25];
    static var NOTE_WIDTH = 400;
    static var NOTE_X_OFFSET = 20;
    static var NOTE_Y_OFFSET = 10;
@@ -421,6 +423,23 @@ class BookMenu extends MovieClip
          this.oBreakFmt.font = this.RefTextFieldTextFormat.font;
          this.oBreakFmt.size = size;
       }
+      // Headings: each run's base size as loaded (its first character's), then the heading lines styled, in locked
+      // text too, so the editor shows what reading shows.
+      k = 0;
+      while(k < segs.length)
+      {
+         var first = this.BodyStart(k);
+         segs[k].baseSize = this.BodyEnd(k) > first ? this.EditField.getTextFormat(first, first + 1).size : size;
+         if(segs[k].locked > 0)
+         {
+            this.StyleLockedHeadings(k);
+         }
+         if(segs[k].editable)
+         {
+            this.StyleHeadings(k);
+         }
+         k++;
+      }
    }
 
    // Development check: the editor's page starts against the reading view's (the same text, so the same lines).
@@ -442,8 +461,13 @@ class BookMenu extends MovieClip
       {
          blank += " ";
       }
-      if(rf.text.split(BookMenu.PAGE_BREAK_TAG).join(blank) != this.EditField.text.split(BookMenu.PAGE_BREAK_TAG).join(blank))
+      var editing0 = this.EditField.text.split(BookMenu.PAGE_BREAK_TAG).join(blank);
+      if(rf.text.split(BookMenu.PAGE_BREAK_TAG).join(blank) != editing0)
       {
+         if(editing0.indexOf("# ") >= 0)
+         {
+            return "headings in the text: the editor keeps their marks, so its offsets differ (not checked)";
+         }
          return "texts differ: reading " + rf.text.length + " chars, editing " + this.EditField.length;
       }
       var reading = [];
@@ -475,6 +499,137 @@ class BookMenu extends MovieClip
       }
       var counts = "reading " + reading.length + " page starts, editing " + editing.length;
       return out.length ? "differs (" + counts + "):" + out : "ok (" + counts + ")";
+   }
+
+   // 1 for a line starting "# ", 2 for "## ", else 0.
+   static function HeadingLevel(text, pos)
+   {
+      if(text.substr(pos, 2) == "# ")
+      {
+         return 1;
+      }
+      if(text.substr(pos, 3) == "## ")
+      {
+         return 2;
+      }
+      return 0;
+   }
+
+   // Reading: each heading line's mark taken out and its text enlarged, from the last line up so offsets hold.
+   static function ReadHeadings(tf)
+   {
+      var text = tf.text;
+      var starts = [0];
+      var i = 0;
+      while(i < text.length)
+      {
+         if(text.charAt(i) == "\r")
+         {
+            starts.push(i + 1);
+         }
+         i++;
+      }
+      var j = starts.length - 1;
+      while(j >= 0)
+      {
+         var p = starts[j];
+         var level = BookMenu.HeadingLevel(text, p);
+         if(level > 0)
+         {
+            var mark = level + 1;
+            var end = text.indexOf("\r", p);
+            if(end < 0)
+            {
+               end = text.length;
+            }
+            var size = tf.getTextFormat(end > p + mark ? p + mark : p, end > p + mark ? p + mark + 1 : p + 1).size;
+            tf.replaceText(p, p + mark, "");
+            if(end - mark > p && size > 0)
+            {
+               var f = new TextFormat();
+               f.size = Math.round(size * BookMenu.HEADING_SCALE[level]);
+               tf.setTextFormat(p, end - mark, f);
+            }
+         }
+         j--;
+      }
+   }
+
+   // Writing: run k's heading lines enlarged from the run's base size, their marks kept but shrunk to nothing.  Without
+   // the client's hint (FormatBreaks then resets nothing), its other lines go back to the base size here.
+   function StyleHeadings(k)
+   {
+      var tf = this.EditField;
+      var text = tf.text;
+      var start = this.BodyStart(k);
+      var end = this.BodyEnd(k);
+      var base = this.oContentFmt != undefined ? this.oContentFmt.size : this.aSegs[k].baseSize;
+      var reset = this.oContentFmt == undefined && base > 0;
+      // A run that begins mid-line (after locked text) has no line start there.
+      var lineStart = start == 0 || text.charAt(start - 1) == "\r";
+      var p = start;
+      while(p <= end)
+      {
+         var lineEnd = text.indexOf("\r", p);
+         if(lineEnd < 0 || lineEnd > end)
+         {
+            lineEnd = end;
+         }
+         if(reset)
+         {
+            var plain = new TextFormat();
+            plain.size = base;
+            tf.setTextFormat(p, lineEnd < end ? lineEnd + 1 : lineEnd, plain);
+         }
+         var level = lineStart ? BookMenu.HeadingLevel(text, p) : 0;
+         this.StyleHeadingLine(p, lineEnd, level, base);
+         p = lineEnd + 1;
+         lineStart = true;
+      }
+   }
+
+   // Locked text's heading lines, once as loaded (it can't change), each from its own size as reading does.
+   function StyleLockedHeadings(k)
+   {
+      var text = this.EditField.text;
+      var start = this.SegStart(k);
+      var end = start + this.aSegs[k].locked;
+      var lineStart = start == 0 || text.charAt(start - 1) == "\r";
+      var p = start;
+      while(p < end)
+      {
+         var lineEnd = text.indexOf("\r", p);
+         if(lineEnd < 0 || lineEnd > end)
+         {
+            lineEnd = end;
+         }
+         var level = lineStart ? BookMenu.HeadingLevel(text, p) : 0;
+         if(level > 0 && p + level + 1 < lineEnd)
+         {
+            this.StyleHeadingLine(p, lineEnd, level, this.EditField.getTextFormat(p + level + 1, p + level + 2).size);
+         }
+         p = lineEnd + 1;
+         lineStart = true;
+      }
+   }
+
+   // One heading line [p, lineEnd) of this level (0: none): its mark at size 1, the rest scaled from base.
+   function StyleHeadingLine(p, lineEnd, level, base)
+   {
+      var mark = level + 1;
+      if(level == 0 || p + mark > lineEnd)
+      {
+         return undefined;
+      }
+      var tiny = new TextFormat();
+      tiny.size = 1;
+      this.EditField.setTextFormat(p, p + mark, tiny);
+      if(lineEnd > p + mark && base > 0)
+      {
+         var f = new TextFormat();
+         f.size = Math.round(base * BookMenu.HEADING_SCALE[level]);
+         this.EditField.setTextFormat(p + mark, lineEnd, f);
+      }
    }
 
    // Body k's formats after an edit.  With the plugin's hint (SetEditMarked's font and size): its text in them, each
@@ -516,6 +671,7 @@ class BookMenu extends MovieClip
             b++;
          }
       }
+      this.StyleHeadings(k);
    }
 
    // ---- Blood ----
@@ -1335,6 +1491,7 @@ class BookMenu extends MovieClip
       {
          this.ReferenceTextField._width = BookMenu.NOTE_WIDTH;
       }
+      BookMenu.ReadHeadings(this.ReferenceTextField);
       this.PageInfoA.push({pageTop:0,pageHeight:this.iMaxPageHeight});
       this.iCurrentLine = 0;
       this.iPaginationIndex = setInterval(this,"CalculatePagination",30);

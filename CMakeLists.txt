@@ -29,6 +29,7 @@ include(lib/commonlibsse-ng/cmake/CommonLibSSE.cmake)
 set(sources
     src/main.cpp
     src/API.cpp
+    src/Clipboard.cpp
     src/Clients.cpp
     src/Editor.cpp
     src/Keys.cpp

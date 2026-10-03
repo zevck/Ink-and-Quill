@@ -19,18 +19,14 @@
 
 #pragma once
 
-// The text the player sees, from Interface/Translations/InkAndQuill_<language>.txt (English
-// when the game's language has none).  See docs/EDITOR.md#strings.
-namespace InkAndQuill::Strings {
+// The Windows clipboard for the editor's paste and copy (docs/EDITOR.md#input).  The game window's thread only.
+namespace InkAndQuill::Clipboard {
 
-    // kDataLoaded: reads the game's language and its translation file.
-    void Load();
+    // The clipboard's text made safe to type (UTF-8): line breaks as "\r", tabs as spaces, no other control
+    // characters and no private-use characters (Ink & Quill's blood and lock markers among them).  Empty: none.
+    std::string ReadForTyping();
 
-    // The text for a key ("$IQ_SavePrompt"); the key itself if no file has it.  "\n" is a line break.
-    const std::string& Get(std::string_view key);
-
-    // UTF-16 to UTF-8 and back (Windows' text and the game's).
-    std::string Utf8(std::wstring_view text);
-    std::wstring Wide(std::string_view text);
+    // Puts text (UTF-8, "\n" line breaks; private-use markers dropped) on the clipboard.  False: it couldn't.
+    bool Write(std::string_view text);
 
 }

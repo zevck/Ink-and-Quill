@@ -19,6 +19,7 @@
 
 #include "Editor.h"
 
+#include "Clipboard.h"
 #include "Keys.h"
 #include "Settings.h"
 #include "Strings.h"
@@ -26,7 +27,6 @@
 #include "WritingTools.h"
 
 #include <Windows.h>
-#include <chrono>
 
 namespace InkAndQuill::Editor {
 
@@ -53,13 +53,6 @@ namespace InkAndQuill::Editor {
                 }
             });
         }
-
-        // Held-key repeat, like a text box (input thread only).
-        constexpr auto kKeyRepeatDelay = std::chrono::milliseconds(400);
-        constexpr auto kKeyRepeatRate = std::chrono::milliseconds(50);
-        std::uint32_t g_lastScanCode = 0;
-        std::chrono::steady_clock::time_point g_lastKeyTime{};
-        bool g_keyRepeating = false;
 
         // ---- The session (the UI's thread: the input sink queues its work there) ----
 
@@ -606,30 +599,6 @@ namespace InkAndQuill::Editor {
             static inline REL::Relocation<decltype(thunk)> func;
         };
 
-        // True if this press (or held repeat) should produce input now.
-        bool ShouldProcess(const RE::ButtonEvent* button, std::uint32_t scanCode)
-        {
-            if (button->IsUp()) {
-                if (scanCode == g_lastScanCode) {
-                    g_lastScanCode = 0;
-                    g_keyRepeating = false;
-                }
-                return false;
-            }
-            const auto now = std::chrono::steady_clock::now();
-            if (button->IsDown()) {
-                g_lastScanCode = scanCode;
-                g_lastKeyTime = now;
-                g_keyRepeating = false;
-                return true;
-            }
-            if (!button->IsHeld() || scanCode != g_lastScanCode) return false;
-            if (now - g_lastKeyTime < (g_keyRepeating ? kKeyRepeatRate : kKeyRepeatDelay)) return false;
-            g_keyRepeating = true;
-            g_lastKeyTime = now;
-            return true;
-        }
-
         void HandleKey(std::uint32_t scanCode)
         {
             if (scanCode == kEscape) {
@@ -664,18 +633,24 @@ namespace InkAndQuill::Editor {
             GetKeyboardState(keyState);
             WCHAR chars[8] = {};
             const auto vk = MapVirtualKeyW(scanCode, MAPVK_VSC_TO_VK);
+            // Ctrl (not AltGr, which some layouts type with): Ctrl+V pastes, Ctrl+C copies the run the caret is in.
+            if ((keyState[VK_CONTROL] & 0x80) && !(keyState[VK_MENU] & 0x80)) {
+                if (vk == 'V' && CanWrite()) {
+                    if (const auto text = Clipboard::ReadForTyping(); !text.empty()) Invoke("AppendEditChar", text.c_str());
+                } else if (vk == 'C') {
+                    const auto run = CaretEntry();
+                    const auto bodies = run ? ReadBodies() : std::nullopt;
+                    if (bodies && Clipboard::Write((*bodies)[*run])) Notify(Strings::Get("$IQ_Copied"));
+                }
+                return;
+            }
             const int count = ToUnicode(vk, scanCode, keyState, chars, 8, 0);
             std::wstring typed;
             for (int i = 0; i < count; ++i) {
                 if (chars[i] >= 32) typed += chars[i];
             }
             if (typed.empty()) return;
-            char utf8[32] = {};
-            if (WideCharToMultiByte(CP_UTF8, 0, typed.c_str(), static_cast<int>(typed.size()), utf8, sizeof(utf8) - 1,
-                                    nullptr, nullptr) > 0 &&
-                CanWrite()) {
-                Invoke("AppendEditChar", utf8);
-            }
+            if (CanWrite()) Invoke("AppendEditChar", Strings::Utf8(typed).c_str());
         }
 
         // Every way of closing the book reaches the menu here: with unsaved changes it's held back
@@ -743,7 +718,7 @@ namespace InkAndQuill::Editor {
                     continue;
                 }
                 if (IsClientKey(code) || IsModifier(code)) continue;
-                if (ShouldProcess(button, code)) {
+                if (Keys::ShouldRepeat(button, code)) {
                     QueueUI([code]() {
                         if (g_active && !g_prompting) HandleKey(code);
                     });

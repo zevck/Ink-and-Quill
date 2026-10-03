@@ -16,7 +16,7 @@ Status: draft. The editor is copied from Physical Diaries and runs on an interna
 
 **Clients own:** their items (blank journals, parchment), how they're sold and crafted, storage of the text, what saving means (a diary entry in SkyrimNet, a letter in LetterDB), and their own keys and menus beyond the editor (Physical Diaries' new-entry key; how Physical Letters finds a letter's recipient).
 
-**Non-goals:** storing documents (clients store; a Papyrus caller gets the text back and keeps it as it likes), depending on SkyrimNet (nothing in Ink & Quill needs it), layouts (the client renders; [Marked text](#marked-text-agreed-2026-10-02)), rich formatting typed by the player beyond blood text.
+**Non-goals:** storing documents (clients store), a Papyrus API ([below](#papyrus-api)), depending on SkyrimNet (nothing in Ink & Quill needs it), layouts (the client renders; [Marked text](#marked-text-agreed-2026-10-02)), rich formatting typed by the player beyond blood text.
 
 ## Concepts
 
@@ -106,22 +106,11 @@ The materials calls are public so a client with its own UI can still share the i
 
 ## Papyrus API
 
-For mods without a DLL: ask the player to write, get the text back.
-
-```papyrus
-; Opens akBook (in the player's inventory) for writing a single body, with asTitle shown above it.
-; Returns a request id, or 0 if writing is off or the player can't write (no quill).
-int Function RequestText(Form akBook, string asTitle, string asInitialText = "", int aiInk = 1, bool abBloodAllowed = true) global native
-
-; Sent when the request ends: the text on Save, "" and abSaved false on Discard.
-; Event InkAndQuill_Written(int aiRequestId, string asText, bool abSaved)  ; an SKSE mod event
-```
-
-Papyrus requests are one unlocked run under a locked title, ink per save, no consumed item; anything richer needs the C++ API.
+**Not planned** (2026-10-03; reconsider if a Papyrus mod author asks). A Papyrus mod could get the player's text back, but couldn't put it back in the book: a book's text is fixed in its record, and only an SKSE plugin can change what the book menu shows (Physical Diaries and Physical Letters each hook `GetDescription` for their own books). Ink & Quill would have to store each Papyrus mod's text and show it itself, which is the document storage it leaves to clients (saves, orphaned text), and render plain text for reading. For plain text input, Papyrus mods already have UIExtensions' text entry. The sketch it replaced was `RequestText(book, title, initialText)` plus an `InkAndQuill_Written` mod event.
 
 ## Settings and detection
 
-- **Writing on/off:** detected from `book.swf` as Physical Diaries does now (the marker `BOOKMENU_WRITING_INTERFACE=<n>` in the uncompressed file); `IsWritingOn()` tells clients. Ink & Quill is the only mod shipping `book.swf`.
+- **Writing on/off:** detected from `book.swf` (the marker `BOOKMENU_WRITING_INTERFACE=<n>` in the uncompressed file, [EDITOR.md](EDITOR.md#writing-mode)); `IsWritingOn()` tells clients. Ink & Quill is the only mod shipping `book.swf`.
 - **Keys:** the edit key (start writing in the open book, if a client or blank owns it; on any other book it does nothing) is Ink & Quill's, in its MCM. Clients' own keys (Physical Diaries' new entry, tear-out) stay theirs: they register them (`RegisterKeys`) so they get through while writing, and call `BeginSession`, `Reload` or `Prompt`.
 - **Strings:** the editor's prompts and notices are Ink & Quill's, in its translation files. Messages a client returns (a refused save) are the client's.
 

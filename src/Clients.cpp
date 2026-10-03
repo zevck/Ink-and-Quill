@@ -19,6 +19,8 @@
 
 #include "Clients.h"
 
+#include "Strings.h"
+
 #include <Windows.h>
 
 namespace InkAndQuill::Clients {
@@ -31,14 +33,6 @@ namespace InkAndQuill::Clients {
 
         std::mutex g_lock;
         std::vector<Entry> g_clients;
-
-        std::string Utf8(std::wstring_view text)
-        {
-            const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-            std::string out(size > 0 ? size : 0, '\0');
-            if (size > 0) WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
-            return out;
-        }
 
         HMODULE ModuleOf(const void* address)
         {
@@ -60,7 +54,7 @@ namespace InkAndQuill::Clients {
             GetModuleFileNameW(module, path, MAX_PATH);
             std::wstring_view file = path;
             if (const auto slash = file.find_last_of(L"\\/"); slash != std::wstring_view::npos) file.remove_prefix(slash + 1);
-            auto& entry = g_clients.emplace_back(Entry{ module, { Utf8(file), {} } });
+            auto& entry = g_clients.emplace_back(Entry{ module, { Strings::Utf8(file), {} } });
             SKSE::log::info("[Clients] {} uses Ink & Quill", entry.client.file);
             return &entry;
         }

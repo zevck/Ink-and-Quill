@@ -60,14 +60,9 @@ namespace InkAndQuill::Strings {
                 if (line.ends_with(L'\r')) line.pop_back();
                 const auto tab = line.find(L'\t');
                 if (!line.starts_with(L'$') || tab == std::wstring::npos) continue;
-                auto utf8 = [](std::wstring_view w) {
-                    std::string out(WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr), '\0');
-                    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), static_cast<int>(out.size()), nullptr, nullptr);
-                    return out;
-                };
-                std::string value = utf8(std::wstring_view(line).substr(tab + 1));
+                std::string value = Utf8(std::wstring_view(line).substr(tab + 1));
                 for (std::size_t at = 0; (at = value.find("\\n", at)) != std::string::npos;) value.replace(at, 2, "\n");
-                g_strings.insert_or_assign(utf8(std::wstring_view(line).substr(0, tab)), std::move(value));
+                g_strings.insert_or_assign(Utf8(std::wstring_view(line).substr(0, tab)), std::move(value));
                 ++count;
             }
             SKSE::log::info("[Strings] {} strings from {}", count, path);
@@ -85,6 +80,22 @@ namespace InkAndQuill::Strings {
             SKSE::log::info("[Strings] No translation for {}: English", language);
         }
         if (!english) SKSE::log::error("[Strings] Interface/Translations/InkAndQuill_ENGLISH.txt is missing");
+    }
+
+    std::string Utf8(std::wstring_view text)
+    {
+        const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+        std::string out(size > 0 ? size : 0, '\0');
+        if (size > 0) WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
+        return out;
+    }
+
+    std::wstring Wide(std::string_view text)
+    {
+        const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+        std::wstring out(size > 0 ? size : 0, L'\0');
+        if (size > 0) MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
+        return out;
     }
 
     const std::string& Get(std::string_view key)

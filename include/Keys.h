@@ -29,6 +29,9 @@ namespace InkAndQuill::Keys {
 
     bool IsModifier(std::uint32_t code);
 
+    // Input thread: this press, or a held key's repeat (like a text box), should produce input now.
+    bool ShouldRepeat(const RE::ButtonEvent* button, std::uint32_t code);
+
     enum class Problem { None, NotKeyboard, Types };
 
     // Whether a key can be the edit key or a client's key: not a keyboard key (SkyUI also offers mouse and gamepad

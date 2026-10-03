@@ -2,7 +2,7 @@
 
 How a client mod uses Ink & Quill's editor. Header: `include/InkAndQuillAPI.h` (plain C; copy it into the client). Code: `src/API.cpp`, over `Editor` and `WritingTools`. The design and its reasons are in [API_DESIGN.md](API_DESIGN.md); the editor's behaviour in [EDITOR.md](EDITOR.md).
 
-**Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries uses it; Papyrus isn't in it.
+**Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries uses it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 
 ## Getting it
 
@@ -73,6 +73,10 @@ A client action while writing that needs the caret or a question (Physical Diari
 ## Clients
 
 Every DLL that calls the API is listed in Ink & Quill's MCM, found by the address it called from: nothing to register. `SetClientName(name)` (optional, any time) gives the name it's listed under; otherwise it's the DLL's file name. See [SETTINGS.md](SETTINGS.md#the-mod-list).
+
+## Headings
+
+A line starting `# ` (or `## `) is shown as a heading, in the editor and when the book is read ([EDITOR.md](EDITOR.md#headings)). Clients keep the `# ` in the text they store and render, and don't escape `#`; their reading text gets the same treatment from Ink & Quill's SWF.
 
 ## Writing materials
 

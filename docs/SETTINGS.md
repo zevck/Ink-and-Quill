@@ -27,6 +27,6 @@ The natives (`InkAndQuill_MCM`, global): `GetSetting`, `SetSetting`, `GetSetting
 
 ## The mod list
 
-Every DLL that calls the C API (`IQ_GetAPI`, `AddOwner`, `RegisterBlank`, `SetClientName`) is listed, found by the address it called from (`_ReturnAddress`, `GetModuleHandleExW`), so a client doesn't have to register to appear. It shows under the name it gave `SetClientName`, else its DLL's file name without `.dll`. Papyrus-only clients will be added with the Papyrus API.
+Every DLL that calls the C API (`IQ_GetAPI`, `AddOwner`, `RegisterBlank`, `SetClientName`) is listed, found by the address it called from (`_ReturnAddress`, `GetModuleHandleExW`), so a client doesn't have to register to appear. It shows under the name it gave `SetClientName`, else its DLL's file name without `.dll`. Only DLL clients are listed; there's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 
 Strings: the `$IQ_…` MCM keys in `Interface\Translations\InkAndQuill_ENGLISH.txt` (SkyUI reads the file by the plugin's name). English only so far.
