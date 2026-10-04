@@ -24,6 +24,9 @@
 #include "Clients.h"
 #include "Editor.h"
 #include "Input.h"
+#include "Keys.h"
+#include "Settings.h"
+#include "Strings.h"
 #include "Suggestions.h"
 #include "WritingMode.h"
 #include "WritingTools.h"
@@ -90,6 +93,19 @@ namespace {
         }
     }
     std::int32_t CaretRun() { return Editor::CaretRun(); }
+
+    std::int32_t CheckKey(std::uint32_t code, const char** message)
+    {
+        std::int32_t problem = IQ_KEY_OK;
+        switch (Keys::Check(code)) {
+        case Keys::Problem::NotKeyboard: problem = IQ_KEY_NOT_KEYBOARD; break;
+        case Keys::Problem::Types: problem = IQ_KEY_TYPES; break;
+        default: problem = code == Settings::EditKey() ? IQ_KEY_EDIT_KEY : IQ_KEY_OK; break;
+        }
+        static constexpr const char* kMessages[] = { "", "$IQ_ClientKeyNotKeyboard", "$IQ_ClientKeyTypes", "$IQ_ClientKeyIsEditKey" };
+        if (message) *message = problem == IQ_KEY_OK ? "" : Strings::Get(kMessages[problem]).c_str();
+        return problem;
+    }
 
     bool Prompt(const char* text, const char* const* buttons, std::int32_t count, std::int32_t cancelButton,
                 IQ_PromptDone done, void* user)
@@ -241,6 +257,7 @@ namespace {
         .CaretRun = CaretRun,
         .Prompt = Prompt,
         .Suggest = Suggest,
+        .CheckKey = CheckKey,
     };
 }
 
