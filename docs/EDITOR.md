@@ -27,7 +27,7 @@ The edit key (default F3) and the writing settings (quill and ink required, inkw
 
 ## Strings
 
-What the player sees is in `Interface\Translations\InkAndQuill_<LANGUAGE>.txt` (UTF-16 LE, `$IQ_<key><tab><text>`, `\n` a line break), read by `Strings::Load` at `kDataLoaded`: English first, then the game's language (`sLanguage:General`) over it. A missing key shows as the key. Only English exists so far.
+What the player sees is in `Interface\Translations\InkAndQuill_<LANGUAGE>.txt` (UTF-16 LE, `$IQ_<key><tab><text>`, `\n` a line break), read by `Strings::Load` at `kDataLoaded`: English first, then the game's language (`sLanguage:General`) over it. A missing key shows as the key. All nine of Skyrim SE's languages ship (English, French, German, Italian, Spanish, Polish, Russian, Japanese, Chinese: Physical Diaries' set and wording, German formal), one file holding the editor's strings and the MCM's; the translations were written without a native speaker's review (2026-10-04) and stay until one corrects them. A new key goes into all nine.
 
 ## Starting
 
@@ -72,6 +72,8 @@ An item the client writes into for the first time: Physical Diaries' blank journ
 - **Discard, or putting the quill down,** in a session begun in a blank: nothing is made and the blank stays.
 
 ## Input
+
+**IME input** (Japanese, Chinese, Korean) isn't supported: on its own no IME works in the game, and typing is read from the keys. Players paste text written elsewhere (Ctrl+V). The findings and the plan are under [Not done yet](#not-done-yet).
 
 While the player writes, **every keyboard event is Ink & Quill's**: it reads them for the editor, then takes them out of the game's input, so nothing after it sees them: the book menu (no page turns on the arrows, A and D, no controls), Papyrus hotkeys (`RegisterForKey`: SKSE delivers them from a later input sink), other mods' input sinks, and mods hooked on the engine's input dispatch (Wheeler and the like). Mouse and gamepad events pass (a click turns pages; the gamepad's B reaches the close hook). The pattern is SkyrimNet Prisma Dashboard's (`Input`, `FilterInput`; it queues the editor's work with `Editor::OnEditKey` and `OnKey`):
 
@@ -127,5 +129,11 @@ Inline completion for clients (`Suggest`, [API.md](API.md#suggestions)). Code: `
 - **The quill cursor** is deferred past 1.0 ([Quill cursor](#quill-cursor)).
 - **The API**: version 1 is built ([API.md](API.md)); Physical Diaries uses its sessions, blanks, keys and prompts (AE). Physical Letters' letter editor is a client (its recipient preview uses `onChange`). No Papyrus API is planned ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 - **Renamed inkwells** ran on AE: the hand-made extra list works and the name survives save and load (2026-10-03). Not tested: dropping and picking up, containers, selling and buying back, SkyUI showing the name, SE.
-- **Translations** beyond English (the editor's strings and the MCM's).
+- **IME input** (decided 2026-10-04: wait until it's asked for). Built once and removed after review, untested: the key filtering could block normal typing. Findings and design in Zev-Tools `notes/skyrim-text-input-re.md`:
+  - No IME works in vanilla: the window has no usable IME context. SkyrimInputMethod (makes one, draws its own panel) and PrismaUI 1.4.1 (its own context while a view has focus, SkyrimNet's chat draws the overlay) each make one work. SkyrimInputMethod alone loses the text in the book menu: it sends committed text as Scaleform character events to the top menu, which reach `bookmenu.swf`, not `book.swf`.
+  - Committed text must be read from the IME in Unicode (`ImmGetCompositionStringW`, `GCS_RESULTSTR`) in a window subclass, the message passed on without it: the game's message loop is ANSI, so its character messages turn Japanese into "?" on a non-Japanese system.
+  - Key handling, from the review: keys belong to the IME only in its native conversion mode, never Ctrl combinations; re-read the IME state when its context changes (another mod's) and when writing starts; skip Enter, Backspace, Escape and arrows until released after a composition ends (SkyrimInputMethod waits 150 ms); find the window with `RE::Main::wnd`.
+  - Without another mod: our own IME context while writing, the composition and candidates drawn at the caret (as a suggestion is), Windows' IME windows hidden; none of it when SkyrimInputMethod is loaded.
+  - Testing needs a working Microsoft IME (the dev machine's stayed on half-width alphanumeric).
+- **Translations** reviewed by native speakers: all nine languages ship, unreviewed.
 - **Input blocking and unpaused writing** ran on AE (2026-10-03): every mod's hotkeys blocked but those that poll the keyboard. Not tested: VR's dispatch offset, a mod hooking the same dispatch call after Ink & Quill, and clients' registered keys (`RegisterKeys`).
