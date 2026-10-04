@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fomod>
+    <Name>Ink &amp; Quill - A Writing Framework</Name>
+    <Author>Zevick</Author>
+    <Version>0.1.0</Version>
+    <Description>A framework to immersively write directly within the book menu, using a quill and ink. Ink &amp; Quill requires another mod to add books to write in and provides nothing on its own.</Description>
+</fomod>

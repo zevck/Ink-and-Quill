@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+    <moduleName>Ink &amp; Quill - A Writing Framework</moduleName>
+    <requiredInstallFiles>
+        <folder source="00 Core" destination="" />
+    </requiredInstallFiles>
+    <installSteps order="Explicit">
+        <installStep name="Book menu">
+            <optionalFileGroups order="Explicit">
+                <group name="Book menu style" type="SelectExactlyOne">
+                    <plugins order="Explicit">
+                        <plugin name="Vanilla">
+                            <description>The vanilla book menu, with writing added.</description>
+                            <files>
+                                <folder source="01 Vanilla" destination="" />
+                            </files>
+                            <typeDescriptor>
+                                <dependencyType>
+                                    <defaultType name="Recommended" />
+                                    <patterns>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Convenient Reading.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Optional" />
+                                        </pattern>
+                                    </patterns>
+                                </dependencyType>
+                            </typeDescriptor>
+                        </plugin>
+                        <plugin name="Convenient Reading UI">
+                            <description>Combines Ink &amp; Quill's writing with Convenient Reading UI by uranreactor. I&amp;Q must overwrite Convenient Reading.
+
+Requires: https://www.nexusmods.com/skyrimspecialedition/mods/50202</description>
+                            <files>
+                                <folder source="02 Convenient Reading" destination="" />
+                            </files>
+                            <typeDescriptor>
+                                <dependencyType>
+                                    <defaultType name="Optional" />
+                                    <patterns>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Convenient Reading.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Recommended" />
+                                        </pattern>
+                                    </patterns>
+                                </dependencyType>
+                            </typeDescriptor>
+                        </plugin>
+                    </plugins>
+                </group>
+            </optionalFileGroups>
+        </installStep>
+    </installSteps>
+</config>

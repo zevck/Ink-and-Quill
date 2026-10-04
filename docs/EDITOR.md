@@ -10,6 +10,8 @@ Writing is on when **Ink & Quill's `book.swf` is the one the game loads**. `Writ
 - The SWF ships **uncompressed** (`FWS`; the build runs `ffdec-cli -decompress` and fails if the output isn't uncompressed with the marker, see [DEVELOPMENT.md](DEVELOPMENT.md)), so `BookMenu.as`'s marker `BOOKMENU_WRITING_INTERFACE=<n>` is plain text in the file. A compressed file or one without the marker is another mod's: off.
 - `<n>` only goes up: bump it when a call is added. The plugin needs at least `kMinInterface` (`WritingMode.cpp`, now 4: `SetEditMarked`); an older SWF is logged as an error and writing is off. The marker's name is the one Physical Diaries' SWF used, before Ink & Quill took the editor over; Ink & Quill is now the only mod shipping `book.swf`. An older copy left over from Physical Diaries (interface 3) is refused as too old.
 
+**Two `book.swf`s ship** (a FOMOD choice, [DEVELOPMENT.md](DEVELOPMENT.md#releases)): **vanilla's** book menu (the game's movie and `BookMenu` class, nothing of any other mod's) plus Ink & Quill's additions, and a **Convenient Reading** one: its movie, with its own changes to the class (font sizes from `Convenient Reading.ini`, the whole book paginated at once) in `//@variant convenient-reading` blocks in `BookMenu.as`, compiled only into that variant. Players with Convenient Reading load Ink & Quill after it.
+
 Only with writing on does `Editor::Register` install the input sink, the menu sink and the two book menu hooks. The log says which (`[WritingMode] On` / `Off: <why>`).
 
 ## Quill, ink and blood

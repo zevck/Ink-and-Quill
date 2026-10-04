@@ -13,6 +13,6 @@ SKSE plugin (CommonLibSSE-NG, C++23; one DLL for SE and AE): "Ink & Quill - Writ
 
 ## Build
 
-`.\Build_Local.ps1`: incremental plugin build, Pyro, the SWF and the ESP, and deploy to the `Ink and Quill - Dev` mod folder in each test instance (paths in the gitignored `Build_Config_Local.ps1`, made from `Build_Config_Local.template.ps1`). PASS/FAIL also goes to `%TEMP%\iq-build-result.json`. Never `/t:Rebuild`: it rebuilds all of CommonLib. After a fresh clone: `git submodule update --init --recursive` (CommonLib has a nested `openvr` submodule). See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+`.\Build_Local.ps1`: incremental plugin build, Pyro, the SWF and the ESP, and deploy to the `Ink and Quill - Dev` mod folder in each test instance (paths in the gitignored `Build_Config_Local.ps1`, made from `Build_Config_Local.template.ps1`). PASS/FAIL also goes to `%TEMP%\iq-build-result.json`. Never `/t:Rebuild`: it rebuilds all of CommonLib. After a fresh clone: `git submodule update --init --recursive` (CommonLib has a nested `openvr` submodule). See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Releases: `.\Build_Release.ps1` (the FOMOD zip, from a clean commit; [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#releases)).
 
 Ask before committing.
