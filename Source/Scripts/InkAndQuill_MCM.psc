@@ -43,7 +43,7 @@ event OnPageReset(string page)
     AddEmptyOption()
     AddHeaderOption("$IQ_HeaderWriting")
     _requireOid = AddToggleOption("$IQ_Materials", GetSetting("Writing.RequireQuillAndInk") != 0)
-    _usesOid = AddSliderOption("$IQ_InkwellUses", GetSetting("Writing.InkwellUses"), "{0}", WritingFlags())
+    _usesOid = AddSliderOption("$IQ_InkwellUses", GetSetting("Writing.InkwellUses"), UsesFormat(), WritingFlags())
     _bloodOid = AddToggleOption("$IQ_Blood", GetSetting("Writing.Blood") != 0, WritingFlags())
     _bloodCostOid = AddSliderOption("$IQ_BloodCost", GetSetting("Writing.BloodCost"), "{0}%", BloodCostFlags())
 
@@ -80,6 +80,16 @@ endfunction
 string function FormatOf(int oid)
     if oid == _bloodCostOid
         return "{0}%"
+    elseif oid == _usesOid
+        return UsesFormat()
+    endif
+    return "{0}"
+endfunction
+
+; 0 writes per inkwell: they never run dry.
+string function UsesFormat()
+    if GetSetting("Writing.InkwellUses") == 0
+        return "$IQ_Infinite"
     endif
     return "{0}"
 endfunction

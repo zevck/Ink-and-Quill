@@ -33,7 +33,7 @@ namespace InkAndQuill::Settings {
 
     // A DirectX scan code, not a key that types: while writing it can't also type.
     inline constexpr Setting kEditKey{ "Keys", "Edit", 61, 1, 255 };      // F3: start writing; save and read again
-    inline constexpr Setting kInkwellUses{ "Writing", "InkwellUses", 10, 1, 100 };  // saves a full inkwell lasts
+    inline constexpr Setting kInkwellUses{ "Writing", "InkwellUses", 10, 0, 100 };  // saves a full inkwell lasts; 0: never runs dry
     inline constexpr Setting kBloodCost{ "Writing", "BloodCost", 10, 1, 100 };      // % of maximum health per save
     inline constexpr Setting kBlood{ "Writing", "Blood", 1, 0, 1 };                 // offered when there's no ink
     inline constexpr Setting kRequireQuillAndInk{ "Writing", "RequireQuillAndInk", 1, 0, 1 };  // 0: writing is free
@@ -42,6 +42,10 @@ namespace InkAndQuill::Settings {
     inline constexpr const Setting* kAll[] = { &kEditKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kQuillAdjust };
 
     void Load();
+
+    // SKSE/Plugins/InkAndQuill.ini, absolute.  Other mods' own INI files go in kModFilesFolder ([Materials]).
+    std::string IniPath();
+    inline constexpr auto kModFilesFolder = "Data/SKSE/Plugins/InkAndQuill";
 
     // "Section.Key" (any case: a Papyrus string may come back in another), or nullptr.
     const Setting* Find(std::string_view name);

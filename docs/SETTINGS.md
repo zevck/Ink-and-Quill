@@ -1,23 +1,37 @@
 # Settings and the MCM
 
-Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAndQuill_MCM.psc` (the SkyUI menu, on `InkAndQuillMCMQuest`, `0x802`), `Clients` (the mod list).
+Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAndQuill_MCM.psc` (the SkyUI menu, on `InkAndQuillMCMQuest`, `0x802`), `Clients` (the mod list), `WritingTools` (`[Materials]`, renaming used inkwells).
 
 ## The INI
 
-`SKSE\Plugins\InkAndQuill.ini`. Every setting is an integer row in `Settings::kAll` (section, key, default, range), read at `kDataLoaded` and clamped. A missing file or key is its default; nothing ships an INI. The MCM changes a setting through `SetSetting`, which writes that one key back at once (`WritePrivateProfileStringA`, so the rest of the file is kept) and takes effect immediately: every reader asks `Settings::Get` when it needs the value.
+`SKSE\Plugins\InkAndQuill.ini`. Every setting is an integer row in `Settings::kAll` (`[Materials]` aside: lists read by `WritingTools`, also from other mods' own files, [below](#other-mods-quills-and-inkwells)) (section, key, default, range), read at `kDataLoaded` and clamped. A missing file or key is its default; nothing ships an INI. The MCM changes a setting through `SetSetting`, which writes that one key back at once (`WritePrivateProfileStringA`, so the rest of the file is kept) and takes effect immediately: every reader asks `Settings::Get` when it needs the value.
 
 | Setting | Default | Range | What |
 |---|---|---|---|
 | `Keys.Edit` | 61 (F3) | 1–255 | With a book open: start writing, if a client owns the book or it's a blank. While writing: save and read again |
 | `Writing.RequireQuillAndInk` | 1 | 0–1 | 0: writing needs no quill and no ink, offers no blood and costs nothing (`Editor`'s `g_free`, decided when writing starts) |
-| `Writing.InkwellUses` | 10 | 1–100 | Saves a full inkwell lasts |
+| `Writing.InkwellUses` | 10 | 0–100 | Saves a full inkwell lasts; 0: inkwells never run dry (none is used or renamed; the MCM shows "Infinite") |
 | `Writing.Blood` | 1 | 0–1 | With a quill but no ink, offer to write in blood. 0: the `NeedsInk` notice instead (a HUD notice on a blank) |
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
 | `Debug.QuillAdjust` | 0 | 0–1 | Development only, not in the MCM: shows the quill cursor (deferred past 1.0) and lets the numpad move it ([EDITOR.md](EDITOR.md#quill-cursor)) |
 
 The key is a DirectX scan code, not one that types (while writing it couldn't also type). The MCM refuses, with a message, a code that isn't a keyboard key (SkyUI also offers mouse and gamepad buttons, 256 and up) or a key that types or edits (`GetKeyProblem`, i.e. `Keys::Check`, also used for clients' keys: Escape, Backspace, Enter, Delete, the arrows, Home, End, the modifiers, and anything that gives a character with the player's layout). It doesn't check conflicts: it only acts while a book is open, where game controls don't apply. Clients' own keys (Physical Diaries' new entry and tear-out) are theirs, in their own settings.
 
-**Changing `InkwellUses`:** an inkwell already used keeps its name ("Inkwell (7/10)") until its next use, which reads its own count back (`UsesLeft`, any `(n/m)`), takes one off, and names it against the new maximum, never above it: with 20, "(6/20)"; with 5, "(4/5)".
+**Changing `InkwellUses`:** used inkwells are renamed against the new maximum, keeping their uses left but never above it ("Inkwell (7/10)": with 20, "(7/20)"; with 5, "(5/5)"), when the inventory, a container, a shop or the gift menu opens: the player's own, and the opened container's (not a shop's stock, which is in the merchant's chest). Any other is renamed on its next use, which reads its own count back (`UsesLeft`, any `(n/m)`) the same way. With 0 (never run dry) names are left alone.
+
+## Other mods' quills and inkwells
+
+Items from other mods count as quills or inkwells when an INI names them, in a `[Materials]` section: `Quills` and `Inkwells`, each a comma-separated list of `0xFormID~Plugin.esp` (the form ID as in the plugin; a load-order byte copied with it is ignored; `.esl` and `.esm` too; spaces around an entry are trimmed, a plugin name keeps its own).
+
+```ini
+[Materials]
+Quills = 0x000D62~FancyQuills.esp, 0x000D63~FancyQuills.esp
+Inkwells = 0x000801~ScribesInk.esl
+```
+
+- **Where:** `SKSE/Plugins/InkAndQuill.ini`, and any `.ini` in `SKSE/Plugins/InkAndQuill/`: a mod (or a patch) ships its own file there instead of editing Ink & Quill's. All are read at `kDataLoaded`; a change needs a restart.
+- **Any item** the player can carry; an inkwell is renamed and used up like the vanilla one. An entry that isn't an item in a loaded plugin is skipped and logged.
+- **Not in the form lists:** the items are kept by Ink & Quill, not added to `InkAndQuillQuills` or `InkAndQuillInkwells` (an added form would stay in the player's save once it's taken out of the INI). Editing the lists in the ESP (a patch plugin) works too.
 
 ## The MCM
 

@@ -109,15 +109,13 @@ namespace InkAndQuill::Editor {
     bool Prompt(const std::string& text, const std::vector<std::string>& buttons, int cancelButton,
                 std::function<void(int)> done);
 
-    // While writing, every keyboard event is taken from the game but clients' own keys (a new entry): this client's
-    // set, replacing its last.  Keys that type or edit, and the edit key, are refused.  Returns how many were kept.
-    int SetClientKeys(const void* client, const std::vector<std::uint32_t>& codes);
-
     // Once, at kDataLoaded: the book-menu and keyboard sinks and the menu hooks.
     void Register();
 
-    // At the first kPostLoadGame or kNewGame (after Wheeler hooks the same call at kDataLoaded): the input dispatch hook.
-    void InstallInputHook();
+    // Input thread (Input): the book menu is open; the edit key pressed; a key while writing.  The work is queued.
+    bool IsBookOpen();
+    void OnEditKey(bool writing);  // writing: as the input thread saw it, so the key and its filtering agree
+    void OnKey(std::uint32_t scanCode);
 
     // A load or new game: drop the session.
     void Reset();

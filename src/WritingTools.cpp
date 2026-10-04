@@ -23,6 +23,10 @@
 
 #include <charconv>
 #include <cstring>
+#include <sstream>
+#include <unordered_set>
+
+#include <Windows.h>
 
 namespace InkAndQuill::WritingTools {
 
@@ -45,41 +49,146 @@ namespace InkAndQuill::WritingTools {
 
         RE::BGSListForm* g_quills = nullptr;
         RE::BGSListForm* g_inkwells = nullptr;
+        // Other mods' quills and inkwells, from the INI files ([Materials]): kept here, not added to the form lists
+        // (an added form would stay in the player's save after it's taken out of the INI).
+        std::unordered_set<RE::FormID> g_extraQuills, g_extraInkwells;
+
+        bool IsQuill(const RE::TESForm* form) { return form && ((g_quills && g_quills->HasForm(form)) || g_extraQuills.contains(form->GetFormID())); }
+        bool IsInkwell(const RE::TESForm* form) { return form && ((g_inkwells && g_inkwells->HasForm(form)) || g_extraInkwells.contains(form->GetFormID())); }
+
+        // "0x123456~Plugin.esp, 0xABC~Other.esl": each an item the player can carry, added to set.
+        void ReadMaterials(const std::string& path, const char* key, std::unordered_set<RE::FormID>& set)
+        {
+            char text[4096] = {};
+            GetPrivateProfileStringA("Materials", key, "", text, sizeof(text), path.c_str());
+            std::istringstream in(text);
+            const auto trim = [](std::string_view s) {
+                while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
+                while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
+                return std::string(s);
+            };
+            auto* data = RE::TESDataHandler::GetSingleton();
+            for (std::string entry; std::getline(in, entry, ',');) {
+                const auto item = trim(entry);
+                if (item.empty()) continue;
+                const auto tilde = item.find('~');
+                const auto digits = trim(std::string_view(item).substr(0, tilde));
+                const auto plugin = tilde == std::string::npos ? std::string() : trim(std::string_view(item).substr(tilde + 1));
+                RE::FormID id = 0;
+                const bool hex = digits.starts_with("0x") || digits.starts_with("0X");
+                const auto [end, error] = std::from_chars(digits.data() + (hex ? 2 : 0), digits.data() + digits.size(), id, 16);
+                const auto* file = data && !plugin.empty() ? data->LookupModByName(plugin) : nullptr;
+                // An ID copied with its load-order byte: only the plugin's own part counts.
+                if (file) id &= file->IsLight() ? 0xFFF : 0xFFFFFF;
+                auto* form = !file || error != std::errc() || end != digits.data() + digits.size() ? nullptr : data->LookupForm(id, plugin);
+                if (!form || !form->IsBoundObject()) {
+                    SKSE::log::warn("[WritingTools] {} {}: \"{}\" isn't an item in a loaded plugin (\"0x123~Plugin.esp\")", path, key, item);
+                    continue;
+                }
+                set.insert(form->GetFormID());
+            }
+        }
 
         int Count(RE::PlayerCharacter* player, RE::TESBoundObject* item)
         {
             return item ? player->GetInventoryCounts([item](RE::TESBoundObject& i) { return &i == item; })[item] : 0;
         }
 
-        // Any form in the list the player carries.
-        bool CarriesAny(RE::PlayerCharacter* player, RE::BGSListForm* list)
+        // Any such item the player carries.
+        bool CarriesAny(RE::PlayerCharacter* player, bool (*is)(const RE::TESForm*))
         {
-            if (!player || !list) return false;
-            bool found = false;
-            list->ForEachForm([&](RE::TESForm* form) {
-                found = form && Count(player, form->As<RE::TESBoundObject>()) > 0;
-                return found ? RE::BSContainer::ForEachResult::kStop : RE::BSContainer::ForEachResult::kContinue;
-            });
-            return found;
+            auto* changes = player ? player->GetInventoryChanges() : nullptr;
+            if (!changes || !changes->entryList) return false;
+            for (auto* entry : *changes->entryList) {
+                if (entry && is(entry->object) && Count(player, entry->object) > 0) return true;
+            }
+            return false;
         }
 
-        // The uses left in a used inkwell's name, "Inkwell (n/m)", at most the current maximum (the setting may
-        // have changed since it was named); 0 for a full one.
-        int UsesLeft(RE::ExtraDataList* list)
+        // A used inkwell's name: the record's name and "(uses left/maximum)", which NamedUses reads back.
+        std::string InkwellName(RE::TESBoundObject* object, int left) { return std::format("{} ({}/{})", object->GetName(), left, MaxUses()); }
+
+        // A used inkwell's name, "Inkwell (n/m)": n and m, or nothing (a full one).
+        std::optional<std::pair<int, int>> NamedUses(RE::ExtraDataList* list)
         {
             auto* text = list ? list->GetByType<RE::ExtraTextDisplayData>() : nullptr;
-            if (!text || !text->IsPlayerSet()) return 0;
+            if (!text || !text->IsPlayerSet()) return std::nullopt;
             const std::string_view name = text->displayName.c_str();
             const auto open = name.rfind('(');
             const auto slash = name.rfind('/');
-            if (!name.ends_with(")") || open == std::string_view::npos || slash == std::string_view::npos || slash < open) return 0;
+            if (!name.ends_with(")") || open == std::string_view::npos || slash == std::string_view::npos || slash < open) return std::nullopt;
             int uses = 0, of = 0;
             const char* end = name.data() + name.size() - 1;
             const auto [usesEnd, usesError] = std::from_chars(name.data() + open + 1, name.data() + slash, uses);
             const auto [ofEnd, ofError] = std::from_chars(name.data() + slash + 1, end, of);
-            if (usesError != std::errc() || ofError != std::errc() || usesEnd != name.data() + slash || ofEnd != end) return 0;
-            return uses > 0 && of > 0 ? std::min(uses, MaxUses()) : 0;
+            if (usesError != std::errc() || ofError != std::errc() || usesEnd != name.data() + slash || ofEnd != end) return std::nullopt;
+            if (uses <= 0 || of <= 0) return std::nullopt;
+            return std::pair{ uses, of };
         }
+
+        // The uses left in a used inkwell, at most the current maximum (the setting may have changed since it was
+        // named); 0 for a full one.
+        int UsesLeft(RE::ExtraDataList* list)
+        {
+            const auto named = NamedUses(list);
+            return named ? std::min(named->first, MaxUses()) : 0;
+        }
+
+        // Used inkwells named against another maximum, renamed to the current one ("(7/10)" with 20: "(7/20)"; with
+        // 5: "(5/5)").  With 0 (never run dry) they're left alone.  Game thread.
+        bool RenameStale(RE::TESObjectREFR* ref)
+        {
+            auto* changes = ref && MaxUses() > 0 ? ref->GetInventoryChanges() : nullptr;
+            if (!changes || !changes->entryList) return false;
+            bool renamed = false;
+            for (auto* entry : *changes->entryList) {
+                if (!entry || !entry->object || !entry->extraLists || !IsInkwell(entry->object)) continue;
+                for (auto* list : *entry->extraLists) {
+                    const auto named = NamedUses(list);
+                    if (!named || (named->second == MaxUses() && named->first <= MaxUses())) continue;
+                    const auto name = InkwellName(entry->object, std::min(named->first, MaxUses()));
+                    list->SetOverrideName(name.c_str());
+                    renamed = true;
+                }
+            }
+            if (renamed) SKSE::log::info("[WritingTools] Renamed used inkwells to the current maximum ({:08X})", ref->GetFormID());
+            return renamed;
+        }
+
+        // An inventory, container, shop or gift menu opening: the player's and the container's inkwells renamed, and
+        // the menu's list refreshed.
+        class MenuSink : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+        public:
+            RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
+                                                  RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+            {
+                if (!a_event || !a_event->opening) return RE::BSEventNotifyControl::kContinue;
+                const auto& menu = a_event->menuName;
+                RE::RefHandle target = 0;
+                if (menu == RE::ContainerMenu::MENU_NAME) {
+                    target = RE::ContainerMenu::GetTargetRefHandle();
+                } else if (menu != RE::InventoryMenu::MENU_NAME && menu != RE::BarterMenu::MENU_NAME &&
+                           menu != RE::GiftMenu::MENU_NAME) {
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                SKSE::GetTaskInterface()->AddTask([target]() {
+                    try {
+                        auto* player = RE::PlayerCharacter::GetSingleton();
+                        if (RenameStale(player)) RE::SendUIMessage::SendInventoryUpdateMessage(player, nullptr);
+                        RE::TESObjectREFRPtr container;
+                        if (target != 0 && RE::LookupReferenceByHandle(target, container) && container && container.get() != player &&
+                            RenameStale(container.get())) {
+                            RE::SendUIMessage::SendInventoryUpdateMessage(container.get(), nullptr);
+                        }
+                    } catch (const std::exception& e) {
+                        SKSE::log::error("[WritingTools] Renaming inkwells failed: {}", e.what());
+                    } catch (...) {
+                        SKSE::log::error("[WritingTools] Renaming inkwells failed");
+                    }
+                });
+                return RE::BSEventNotifyControl::kContinue;
+            }
+        };
 
         // An empty item extra list as the engine lays one out (CommonLib has no constructor): zeroed,
         // the presence bits on the game heap, and on AE 1.6.629+ the vtable of the player's own list.
@@ -109,9 +218,9 @@ namespace InkAndQuill::WritingTools {
             Inkwell used{ .uses = MaxUses() + 1 };
             Inkwell full;
             auto* changes = player->GetInventoryChanges();
-            if (!changes || !changes->entryList || !g_inkwells) return full;
+            if (!changes || !changes->entryList) return full;
             for (auto* entry : *changes->entryList) {
-                if (!entry || !entry->object || !g_inkwells->HasForm(entry->object)) continue;
+                if (!entry || !IsInkwell(entry->object)) continue;
                 int inLists = 0;
                 if (entry->extraLists) {
                     for (auto* list : *entry->extraLists) {
@@ -135,18 +244,32 @@ namespace InkAndQuill::WritingTools {
         auto* data = RE::TESDataHandler::GetSingleton();
         g_quills = data ? data->LookupForm<RE::BGSListForm>(kQuillsList, kPlugin) : nullptr;
         g_inkwells = data ? data->LookupForm<RE::BGSListForm>(kInkwellsList, kPlugin) : nullptr;
-        if (!g_quills || !g_inkwells) SKSE::log::error("[WritingTools] {}'s quill or inkwell list is missing: nobody can write", kPlugin);
+        if (!g_quills || !g_inkwells) SKSE::log::error("[WritingTools] {}'s quill or inkwell list is missing", kPlugin);
+        // Ink & Quill's own INI, then each mod's file in SKSE/Plugins/InkAndQuill/.
+        std::vector<std::string> files{ Settings::IniPath() };
+        std::error_code ec;
+        for (const auto& file : std::filesystem::directory_iterator(Settings::kModFilesFolder, ec)) {
+            if (file.path().extension() == ".ini") files.push_back(std::filesystem::absolute(file.path()).string());
+        }
+        for (const auto& file : files) {
+            ReadMaterials(file, "Quills", g_extraQuills);
+            ReadMaterials(file, "Inkwells", g_extraInkwells);
+        }
+        SKSE::log::info("[WritingTools] Other quills: {}, other inkwells: {}", g_extraQuills.size(), g_extraInkwells.size());
+        static MenuSink menuSink;
+        if (auto* ui = RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&menuSink);
     }
 
-    bool HasQuill() { return CarriesAny(RE::PlayerCharacter::GetSingleton(), g_quills); }
+    bool HasQuill() { return CarriesAny(RE::PlayerCharacter::GetSingleton(), IsQuill); }
 
-    bool HasInk() { return CarriesAny(RE::PlayerCharacter::GetSingleton(), g_inkwells); }
+    bool HasInk() { return CarriesAny(RE::PlayerCharacter::GetSingleton(), IsInkwell); }
 
     Ink UseInk()
     {
         auto* player = RE::PlayerCharacter::GetSingleton();
         const auto inkwell = player ? Emptiest(player) : Inkwell{};
         if (!inkwell.entry) return Ink::None;
+        if (MaxUses() == 0) return Ink::Used;  // inkwells never run dry: none is used or renamed
         auto* object = inkwell.entry->object;
         const int left = inkwell.uses - 1;
         if (left == 0) {
@@ -154,7 +277,7 @@ namespace InkAndQuill::WritingTools {
             SKSE::log::info("[WritingTools] An inkwell ran dry");
             return Ink::RanDry;
         }
-        const std::string name = std::format("{} ({}/{})", object->GetName(), left, MaxUses());
+        const std::string name = InkwellName(object, left);
         if (inkwell.list && inkwell.list->GetCount() == 1) {
             inkwell.list->SetOverrideName(name.c_str());
         } else {

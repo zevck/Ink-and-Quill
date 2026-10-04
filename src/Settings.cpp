@@ -40,6 +40,8 @@ namespace InkAndQuill::Settings {
         std::string Path() { return std::filesystem::absolute(kPath).string(); }
     }
 
+    std::string IniPath() { return Path(); }
+
     void Load()
     {
         const auto path = Path();

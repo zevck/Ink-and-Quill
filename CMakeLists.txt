@@ -32,6 +32,7 @@ set(sources
     src/Clipboard.cpp
     src/Clients.cpp
     src/Editor.cpp
+    src/Input.cpp
     src/Keys.cpp
     src/Papyrus.cpp
     src/QuillCursor.cpp
@@ -60,6 +61,7 @@ add_commonlibsse_plugin(${PROJECT_NAME}
 target_include_directories(
     ${PROJECT_NAME}
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/api
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_BINARY_DIR}/include
 )

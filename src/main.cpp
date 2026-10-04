@@ -18,6 +18,7 @@
  */
 
 #include "Editor.h"
+#include "Input.h"
 #include "Papyrus.h"
 #include "Settings.h"
 #include "Strings.h"
@@ -49,10 +50,10 @@ namespace {
             break;
         case SKSE::MessagingInterface::kNewGame:
             InkAndQuill::Editor::Reset();
-            if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Editor::InstallInputHook();
+            if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Input::InstallHook();
             break;
         case SKSE::MessagingInterface::kPostLoadGame:
-            if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Editor::InstallInputHook();
+            if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Input::InstallHook();
             break;
         default:
             break;

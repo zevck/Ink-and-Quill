@@ -21,6 +21,7 @@
 
 #include "BookMovie.h"
 #include "Clipboard.h"
+#include "Input.h"
 #include "Keys.h"
 #include "QuillCursor.h"
 #include "Settings.h"
@@ -36,11 +37,6 @@ namespace InkAndQuill::Editor {
     namespace {
         using namespace Keys;
 
-        // Keys clients handle while the player writes (SetClientKeys): left in the input, not read as text.  The
-        // flags for the input thread; each client's set (by its id) to rebuild them when one changes its keys.
-        std::array<std::atomic<bool>, 256> g_clientKeys{};
-        std::mutex g_clientKeysLock;
-        std::map<const void*, std::vector<std::uint32_t>> g_keysByClient;
         std::atomic<bool> g_bookOpen{ false };  // the book menu is open (MenuSink), for the input thread
 
         // A UI task that can't throw past SKSE's queue (CLAUDE.md: every task catches).
@@ -67,6 +63,7 @@ namespace InkAndQuill::Editor {
         std::vector<Owner> g_owners;
         Session g_session;                       // the session writing, or waiting on the blood prompt
         std::vector<Edited> g_edit;              // page order, as the SWF's EditGetBodies
+        std::vector<std::string> g_started;      // the runs as the session began: a Reload's from -2 - k is run k's
         std::atomic<bool> g_active{ false };     // edit mode is on in the open book menu
         std::atomic<bool> g_prompting{ false };  // a prompt is open over the book: keys belong to it
         bool g_blood = false;                    // this session is in blood (no ink)
@@ -88,6 +85,7 @@ namespace InkAndQuill::Editor {
             auto onEnd = std::move(g_session.client.onEnd);
             g_session = {};
             g_edit.clear();
+            g_started.clear();
             g_sessionBlank = 0;
             if (onEnd) onEnd();
         }
@@ -333,6 +331,7 @@ namespace InkAndQuill::Editor {
                 return;
             }
             for (const auto& body : *bodies) g_edit.push_back({ body });
+            g_started = *bodies;
             SKSE::log::info("[Editor] {} runs", g_edit.size());
             g_active = true;
             if (g_blood) {
@@ -704,116 +703,28 @@ namespace InkAndQuill::Editor {
             }
             static inline REL::Relocation<decltype(thunk)> func;
         };
-
-        bool IsClientKey(std::uint32_t code) { return code < g_clientKeys.size() && g_clientKeys[code]; }
-
-        // Reads the keyboard events for the editor, then takes them out of the list, so nothing after it sees them:
-        // the book menu, other mods' sinks and dispatch hooks (docs/EDITOR.md#input).  Input thread: work is queued.
-        void FilterInput(RE::InputEvent** events)
-        {
-            if (!events || !*events || g_prompting) return;  // a prompt's keys are its own
-            const bool writing = g_active;
-            if (!writing && !g_bookOpen) return;
-            bool editKeyTaken = false;
-            for (auto* event = *events; event; event = event->next) {
-                auto* button = event->AsButtonEvent();
-                if (!button || button->GetDevice() != RE::INPUT_DEVICE::kKeyboard) continue;
-                const auto code = button->GetIDCode();
-                if (!writing) {
-                    // The edit key while a book is open: write in it, if a client owns it.
-                    if (code == Settings::EditKey() && button->IsDown()) {
-                        editKeyTaken = true;
-                        QueueUI([]() { BeginFromKey(); });
-                    }
-                    continue;
-                }
-                if (code == Settings::EditKey()) {
-                    if (button->IsDown()) {
-                        QueueUI([]() {
-                            if (g_active && !g_prompting) SaveAndRead();
-                        });
-                    }
-                    continue;
-                }
-                if (IsClientKey(code) || IsModifier(code)) continue;
-                if (Keys::ShouldRepeat(button, code)) {
-                    QueueUI([code]() {
-                        if (g_active && !g_prompting) HandleKey(code);
-                    });
-                }
-            }
-            if (!writing && !editKeyTaken) return;
-            // Unlink what nobody else may see: while writing every keyboard event but clients' keys, else the edit key.
-            RE::InputEvent* kept = nullptr;
-            RE::InputEvent** tail = &kept;
-            for (auto* event = *events; event;) {
-                auto* next = event->next;
-                auto* button = event->AsButtonEvent();
-                const bool keyboard = button && button->GetDevice() == RE::INPUT_DEVICE::kKeyboard;
-                const auto code = keyboard ? button->GetIDCode() : 0;
-                const bool drop = keyboard && (writing ? code == Settings::EditKey() || !IsClientKey(code) : code == Settings::EditKey());
-                if (!drop) {
-                    event->next = nullptr;
-                    *tail = event;
-                    tail = &event->next;
-                }
-                event = next;
-            }
-            *events = kept;
-        }
-
-        // Layer 1: first in line among the input sinks (prepended), ahead of MenuControls and SKSE's Papyrus key events.
-        class InputSink : public RE::BSTEventSink<RE::InputEvent*> {
-        public:
-            RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* a_event,
-                                                  RE::BSTEventSource<RE::InputEvent*>*) override
-            {
-                FilterInput(const_cast<RE::InputEvent**>(a_event));
-                return RE::BSEventNotifyControl::kContinue;
-            }
-        };
-
-        // Layer 2: the engine's input dispatch, the call Wheeler hooks (write_call), hooked after it so ours runs first.
-        struct InputDispatch {
-            static void thunk(RE::BSTEventSource<RE::InputEvent*>* a_source, RE::InputEvent** a_events)
-            {
-                FilterInput(a_events);
-                func(a_source, a_events);
-            }
-            static inline REL::Relocation<decltype(thunk)> func;
-        };
     }
 
     void AddOwner(Owner owner) { g_owners.push_back(std::move(owner)); }
 
-    int SetClientKeys(const void* client, const std::vector<std::uint32_t>& codes)
+    bool IsBookOpen() { return g_bookOpen; }
+
+    void OnEditKey(bool writing)
     {
-        std::vector<std::uint32_t> kept;
-        for (const auto code : codes) {
-            if (Keys::Check(code) != Keys::Problem::None || code == Settings::EditKey()) {
-                SKSE::log::warn("[Editor] Key 0x{:X} refused as a client's key: it types, edits or is the edit key", code);
-                continue;
-            }
-            kept.push_back(code);
+        if (!writing) {
+            QueueUI([]() { BeginFromKey(); });
+            return;
         }
-        std::scoped_lock lock(g_clientKeysLock);
-        g_keysByClient[client] = kept;
-        for (auto& flag : g_clientKeys) flag = false;
-        for (const auto& [id, keys] : g_keysByClient) {
-            for (const auto code : keys) g_clientKeys[code] = true;
-        }
-        SKSE::log::info("[Editor] A client's keys while writing: {} of {} kept", kept.size(), codes.size());
-        return static_cast<int>(kept.size());
+        QueueUI([]() {
+            if (g_active && !g_prompting) SaveAndRead();
+        });
     }
 
-    void InstallInputHook()
+    void OnKey(std::uint32_t scanCode)
     {
-        static bool installed = false;
-        if (std::exchange(installed, true)) return;
-        SKSE::AllocTrampoline(14);
-        REL::Relocation<std::uintptr_t> dispatch{ RELOCATION_ID(67315, 68617), REL::Relocate(0x7B, 0x7B, 0x81) };
-        InputDispatch::func = SKSE::GetTrampoline().write_call<5>(dispatch.address(), InputDispatch::thunk);
-        SKSE::log::info("[Editor] Input dispatch hooked (after Wheeler's, so ours runs first)");
+        QueueUI([scanCode]() {
+            if (g_active && !g_prompting) HandleKey(scanCode);
+        });
     }
 
     void RegisterBlank(RE::FormID blank, Owner onOpen)
@@ -895,6 +806,11 @@ namespace InkAndQuill::Editor {
         std::vector<Edited> edit(count);
         for (std::size_t i = 0; i < count && i < from.size(); ++i) {
             if (from[i] >= 0 && static_cast<std::size_t>(from[i]) < g_edit.size()) edit[i] = g_edit[from[i]];
+            const auto start = static_cast<std::size_t>(-2 - static_cast<long long>(from[i]));
+            if (from[i] <= -2 && start < g_started.size()) edit[i].saved = g_started[start];
+            if (from[i] <= -2 && start >= g_started.size()) {
+                SKSE::log::warn("[Editor] Reload: run {} from start run {}, but the session began with {}: new", i, start, g_started.size());
+            }
         }
         g_edit = std::move(edit);
         g_session.document.marked = std::move(marked);
@@ -950,10 +866,8 @@ namespace InkAndQuill::Editor {
     void Register()
     {
         static MenuSink menuSink;
-        static InputSink inputSink;
         if (auto* ui = RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&menuSink);
-        // First in line, ahead of MenuControls and SKSE's Papyrus key events.
-        if (auto* input = RE::BSInputDeviceManager::GetSingleton()) input->PrependEventSink(&inputSink);
+        Input::Register();
         REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_BookMenu[0] };
         BookMenuProcessMessage::func = vtable.write_vfunc(0x4, BookMenuProcessMessage::thunk);
         BookMenuAdvanceMovie::func = vtable.write_vfunc(0x5, BookMenuAdvanceMovie::thunk);

@@ -17,12 +17,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// The C API (include/InkAndQuillAPI.h) over Editor and WritingTools.  See docs/API.md.
+// The C API (api/InkAndQuillAPI.h) over Editor and WritingTools.  See docs/API.md.
 
 #include "InkAndQuillAPI.h"
 
 #include "Clients.h"
 #include "Editor.h"
+#include "Input.h"
 #include "Suggestions.h"
 #include "WritingMode.h"
 #include "WritingTools.h"
@@ -82,7 +83,7 @@ namespace {
             const void* client = Clients::Note(_ReturnAddress());
             std::vector<std::uint32_t> keys;
             if (codes && count > 0) keys.assign(codes, codes + count);
-            return Editor::SetClientKeys(client, keys);
+            return Input::SetClientKeys(client, keys);
         } catch (const std::exception& e) {
             SKSE::log::error("[API] RegisterKeys: {}", e.what());
             return 0;
@@ -242,6 +243,8 @@ namespace {
         .Suggest = Suggest,
     };
 }
+
+extern "C" __declspec(dllexport) bool IQ_IsWriting() { return InkAndQuill::Editor::IsWriting(); }
 
 extern "C" __declspec(dllexport) const IQ_API* IQ_GetAPI(std::uint32_t version)
 {

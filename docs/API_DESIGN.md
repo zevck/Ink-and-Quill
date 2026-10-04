@@ -77,7 +77,7 @@ UTF-8 text, `\n` line breaks. Blood text between U+E000 and U+E001 (Physical Dia
 
 ## C++ API
 
-Built (version 1): [API.md](API.md) and `include/InkAndQuillAPI.h` are the reference; the sketch below is the design it came from.
+Built (version 1): [API.md](API.md) and `api/InkAndQuillAPI.h` are the reference; the sketch below is the design it came from.
 
 
 C ABI, so clients built with another compiler or CRT work: `InkAndQuill.dll` exports `IQ_GetAPI(version)` returning a struct of function pointers; strings are `const char*` (UTF-8), callbacks are plain function pointers with a `void* user` argument, and every struct starts with its size so later versions can grow it. Clients resolve it at `kPostLoad` (`GetModuleHandle` + `GetProcAddress`, as SkyrimNet's API). Calls are game-thread only unless noted.

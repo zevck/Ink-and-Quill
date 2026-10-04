@@ -1,6 +1,6 @@
 # The C API
 
-How a client mod uses Ink & Quill's editor. Header: `include/InkAndQuillAPI.h` (plain C; copy it into the client). Code: `src/API.cpp`, over `Editor` and `WritingTools`. The design and its reasons are in [API_DESIGN.md](API_DESIGN.md); the editor's behaviour in [EDITOR.md](EDITOR.md).
+How a client mod uses Ink & Quill's editor. Header: [`api/InkAndQuillAPI.h`](../api/InkAndQuillAPI.h), the one file a client needs (plain C; copy it into the client). Code: `src/API.cpp`, over `Editor` and `WritingTools`. The design and its reasons are in [API_DESIGN.md](API_DESIGN.md); the editor's behaviour in [EDITOR.md](EDITOR.md).
 
 **Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries and Physical Letters use it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 
@@ -17,6 +17,17 @@ if (auto* module = GetModuleHandleA("InkAndQuill.dll")) {
 
 `IQ_GetAPI(version)` returns `NULL` if the DLL is older than the client's header. After the first release a newer DLL serves older clients: structs only grow at the end, and `IQ_API::size` and `IQ_Session::size` say how much there is.
 
+## Is the player writing?
+
+A mod that only needs to know, not to write (SkyrimNet's book-capture hotkey staying quiet while the player types), calls the export `IQ_IsWriting` instead of getting the API: it isn't listed as a client, depends on no struct or version, and is safe from any thread.
+
+```cpp
+if (auto* module = GetModuleHandleW(L"InkAndQuill.dll")) {
+    if (auto isWriting = reinterpret_cast<IQ_IsWriting_t>(GetProcAddress(module, "IQ_IsWriting")); isWriting && isWriting()) return;
+}
+```
+
+True while edit mode is on in the open book menu, for any client's session (prompts over the book included); false while reading, and before writing has begun (the blood prompt, `BeginSessionOnOpen` waiting for its book). Same as `IQ_API::IsWriting`.
 ## Rules
 
 - **Threads.** Every callback comes where SKSE runs UI tasks (`AddUITask`): with the book menu, paused or not, Ink & Quill queues its input work there ([EDITOR.md](EDITOR.md#input)). Session calls (`BeginSession`, `CurrentRuns`, `Reload`, `CaretRun`, `Prompt`, `Suggest`, the replies) are made there too: from a callback, or a client's own key handler queuing a UI task first. Registration calls (`AddOwner`, `RegisterBlank`, `RegisterKeys`, `SetClientName`) are fine from SKSE's messaging (`kDataLoaded`) as well.
@@ -38,7 +49,7 @@ What a session edits: the book's text as the client renders it for reading, with
 ## While writing
 
 - **`IsWriting`, `InBlood`:** blood is chosen when writing starts, so a client rendering a new heading knows whether to make it red. Before a session begins, `WouldBeInBlood` says whether it would be (quill and ink required, blood on, a quill but no ink), unless the player declines the prompt.
-- **Changing the structure** (a client's own action, e.g. Physical Diaries' new entry or tear-out, on its own keys): `CurrentRuns(visit, user)` gives the runs as the player has them, unsaved text included; the client renders its text again from those and its change, then `Reload(markedText, readingText, from, count, caretRun, caretOffset)`. `readingText` is the book's text as it now reads (as for a save's reply): a structure change alone (a tear-out) changes no run's text, so the edit key returns to reading without a save, and shows this. `from[i]` is the run that new run `i` was before (-1 for a new one), `count` the number of new runs: each run keeps the text it was last saved with, so unsaved changes still prompt on close. The caret goes to `caretRun` at `caretOffset` (-1: its end).
+- **Changing the structure** (a client's own action, e.g. Physical Diaries' new entry or tear-out, on its own keys): `CurrentRuns(visit, user)` gives the runs as the player has them, unsaved text included; the client renders its text again from those and its change, then `Reload(markedText, readingText, from, count, caretRun, caretOffset)`. `readingText` is the book's text as it now reads (as for a save's reply): a structure change alone (a tear-out) changes no run's text, so the edit key returns to reading without a save, and shows this. `from[i]` is the run that new run `i` was before (-1 for a new one), `count` the number of new runs: each run keeps the text it was last saved with, so unsaved changes still prompt on close. A run that comes back after a `Reload` dropped it (a letter's body locked, then opened again) gives `from[i] = -2 - k`: it counts as saved with the text run `k` had when the session began, so returning it unchanged is no change (no close prompt, no ink). The caret goes to `caretRun` at `caretOffset` (-1: its end).
 
 ## Reacting to typing
 
