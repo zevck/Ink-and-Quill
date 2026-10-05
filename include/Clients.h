@@ -34,6 +34,9 @@ namespace InkAndQuill::Clients {
     // Its display name.
     void Name(const void* caller, std::string name);
 
+    // The caller's display name (else its DLL's file name), for the log.
+    std::string NameOf(const void* caller);
+
     // In the order they first called.
     std::vector<Client> All();
 

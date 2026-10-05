@@ -34,7 +34,7 @@ namespace InkAndQuill::Editor {
     // locks are what the player writes, in order.
     struct Document {
         std::string marked;
-        std::string runFont;  // optional: the format typed text takes, paragraph breaks at the page's size
+        std::string runFont;  // optional: the format typed text takes, line breaks included
         int runSize = 0;
     };
 

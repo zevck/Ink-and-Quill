@@ -133,6 +133,7 @@ namespace {
     bool BeginSession(const IQ_Session* in)
     {
         try {
+            SKSE::log::info("[API] BeginSession from {}", Clients::NameOf(_ReturnAddress()));
             auto session = ToSession(in);
             return session && Editor::Begin(std::move(*session));
         } catch (const std::exception& e) {
@@ -144,6 +145,7 @@ namespace {
     bool BeginSessionOnOpen(std::uint32_t book, const IQ_Session* in)
     {
         try {
+            SKSE::log::info("[API] BeginSessionOnOpen({:08X}) from {}", book, Clients::NameOf(_ReturnAddress()));
             auto session = ToSession(in);
             return session && Editor::BeginOnOpen(book, std::move(*session));
         } catch (const std::exception& e) {

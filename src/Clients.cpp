@@ -85,6 +85,18 @@ namespace InkAndQuill::Clients {
         }
     }
 
+    std::string NameOf(const void* caller)
+    {
+        try {
+            std::scoped_lock lock(g_lock);
+            const auto* entry = Find(caller);
+            return !entry ? "Ink & Quill" : entry->client.name.empty() ? entry->client.file : entry->client.name;
+        } catch (const std::exception& e) {
+            SKSE::log::error("[Clients] Couldn't name a caller: {}", e.what());
+            return "?";
+        }
+    }
+
     std::vector<Client> All()
     {
         std::scoped_lock lock(g_lock);

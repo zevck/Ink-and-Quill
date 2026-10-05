@@ -46,7 +46,7 @@ class BookMenu extends MovieClip
    // ---- Edit mode properties ----
    var bEditMode;
    var iEditPage;        // page the caret is on
-   var aEditPageTops;    // y of each page's first line in EditField (same rule as CalculatePagination), then the text's bottom
+   var aEditPageTops;    // y of each page's first line in EditField (PageLayout), then the text's bottom
    var aEditPageLines;   // index of each page's first line
    var EditClip;         // Visible MovieClip used for editing (duplicated from ReferenceText_mc)
    var EditField;        // The TextField inside EditClip: the whole text, tall enough never to scroll
@@ -55,7 +55,6 @@ class BookMenu extends MovieClip
    var iEditShownFrom;   // books: offset of the engine's current spread in its 4 page slots (0 or 2)
    var aSegs;            // the text as segments: {locked, body, editable} lengths, in order (see EditBuildMarked)
    var oContentFmt;      // entry text's format (config font, content size)
-   var oBreakFmt;        // blank lines' format, as reading has them (see EditBuildMarked)
    var bTextReceived;    // SetBookText has run (EditReady)
    var sBookText;        // the text reading shows now (SetBookText): ReturnToReading with no text reads it again
    var bBlood;           // this writing session is in blood: typed text is red (EditSetBlood)
@@ -232,7 +231,7 @@ class BookMenu extends MovieClip
 
    // From the plugin, before EnterEditMode (4): the book's own text as reading shows it, with what the player can't
    // change between LOCK_OPEN and LOCK_CLOSE.  font and size (optional): the format typed text takes, and paragraph
-   // breaks get the page's outer size (FormatBreaks); without them typed text takes its neighbour's format.
+   // breaks take them too (FormatBreaks); without them typed text takes its neighbour's format.
    function SetEditMarked(text, font, size)
    {
       this.oEditMarked = {text:text, font:font, size:size};
@@ -293,6 +292,7 @@ class BookMenu extends MovieClip
       this.EditField.SetText(this.PageHtml(m.text), true);
       // Where each marker is in the text without markers, then take them out, last first.
       var raw = this.EditField.text;
+      var size = this.PageTextSize();   // an empty run's base size (headings)
       var marks = [];
       var removed = 0;
       var i = 0;
@@ -415,15 +415,11 @@ class BookMenu extends MovieClip
          k++;
       }
       this.oContentFmt = undefined;
-      this.oBreakFmt = undefined;
       if(m.font != undefined && m.font.length && m.size > 0)
       {
          this.oContentFmt = new TextFormat();
          this.oContentFmt.font = m.font;
          this.oContentFmt.size = m.size;
-         this.oBreakFmt = new TextFormat();
-         this.oBreakFmt.font = this.RefTextFieldTextFormat.font;
-         this.oBreakFmt.size = size;
       }
       // Headings: each run's base size as loaded (its first character's), then the heading lines styled, in locked
       // text too, so the editor shows what reading shows.
@@ -575,8 +571,8 @@ class BookMenu extends MovieClip
       }
    }
 
-   // Body k's formats after an edit.  With the plugin's hint (SetEditMarked's font and size): its text in them, each
-   // "\r\r" in the page's outer size, as a renderer that tags paragraphs gives them.  Its blood red, always.
+   // Body k's formats after an edit.  With the plugin's hint (SetEditMarked's font and size): all its text in them,
+   // line breaks included (a break's size sets its line's height).  Its blood red, always.
    function FormatBreaks(k)
    {
       var start = this.BodyStart(k);
@@ -585,21 +581,9 @@ class BookMenu extends MovieClip
       {
          return undefined;
       }
-      if(this.oBreakFmt != undefined)
+      if(this.oContentFmt != undefined)
       {
          this.EditField.setTextFormat(start, end, this.oContentFmt);
-         var text = this.EditField.text;
-         var pos = start;
-         while(true)
-         {
-            var found = text.indexOf("\r\r", pos);
-            if(found < 0 || found + 2 > end)
-            {
-               break;
-            }
-            this.EditField.setTextFormat(found, found + 2, this.oBreakFmt);
-            pos = found + 2;
-         }
       }
       // Text written in blood stays red.
       var blood = this.aSegs[k].blood;
@@ -970,12 +954,7 @@ class BookMenu extends MovieClip
       }
       this.EditField.scroll = 1;
       var tf = this.EditField;
-      var tops = [2];
-      var bottoms = [];
-      var firstLines = [0];
-      var y = 2;   // Flash's text gutter: line 0 starts 2px down
       var caretLine = this.EditCaretLine();
-      var caretPage = 0;
       // Where the blanked [pagebreak]s are (EditBuildMarked).
       var breakAt = {};
       var bk = 0;
@@ -989,42 +968,60 @@ class BookMenu extends MovieClip
          }
          bk++;
       }
+      var pages = this.PageLayout(tf, breakAt);
+      var caretPage = 0;
+      while(caretPage + 1 < pages.lines.length && pages.lines[caretPage + 1] <= caretLine)
+      {
+         caretPage++;
+      }
+      this.aEditPageTops = pages.tops;
+      this.aEditPageBottoms = pages.bottoms;
+      this.aEditPageLines = pages.lines;
+      this.iEditPage = caretPage;
+      this.ShowEditPage(caretPage);
+   }
+
+   // The editor's pages: every line counts (a blank one too), one passing the page's bottom starts the next, a
+   // [pagebreak] line (breakAt: blanked in the editor) ends one.  {tops (then the text's end), bottoms, lines}
+   function PageLayout(tf, breakAt)
+   {
+      var tops = [2];
+      var bottoms = [];
+      var lines = [0];
+      var y = 2;   // Flash's text gutter: line 0 starts 2px down
+      var text = tf.text;   // once: the getter copies the whole text
       var i = 0;
       while(i < tf.numLines)
       {
          var m = tf.getLineMetrics(i);
          var off = tf.getLineOffset(i);
-         // As CalculatePagination: a [pagebreak] line ends the page above it, and the next starts below it.
+         if(i > 0 && off >= tf.length)
+         {
+            // The last line, with no characters (after a final Enter): Flash measures it taller than a typed line, so it
+            // takes the line above's height, or it starts a page that typing into it takes back.
+            m = tf.getLineMetrics(i - 1);
+         }
          var lineEnd = i + 1 < tf.numLines ? tf.getLineOffset(i + 1) : tf.length;
-         if(breakAt[off] || Shared.GlobalFunc.StringTrim(tf.text.substring(off, lineEnd)) == BookMenu.PAGE_BREAK_TAG)
+         if((breakAt != undefined && breakAt[off]) || Shared.GlobalFunc.StringTrim(text.substring(off, lineEnd)) == BookMenu.PAGE_BREAK_TAG)
          {
             bottoms[tops.length - 1] = y;
             y += m.height;
             tops.push(y);
-            firstLines.push(i + 1);
+            lines.push(i + 1);
             i++;
             continue;
          }
-         // Same rule as CalculatePagination: a line whose bottom passes the page starts a new page.
          if(i > 0 && y + m.ascent + m.descent > tops[tops.length - 1] + this.iMaxPageHeight)
          {
             bottoms[tops.length - 1] = y;
             tops.push(y);
-            firstLines.push(i);
-         }
-         if(i == caretLine)
-         {
-            caretPage = tops.length - 1;
+            lines.push(i);
          }
          y += m.height;
          i++;
       }
-      tops.push(y);   // end of the text: bottom of the last page
-      this.aEditPageTops = tops;
-      this.aEditPageBottoms = bottoms;
-      this.aEditPageLines = firstLines;
-      this.iEditPage = caretPage;
-      this.ShowEditPage(caretPage);
+      tops.push(y);
+      return {tops:tops, bottoms:bottoms, lines:lines};
    }
 
    function EditPageCount()

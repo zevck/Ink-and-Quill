@@ -75,6 +75,8 @@ namespace InkAndQuill::Editor {
         RE::FormID g_blankOnOpen = 0;   // a blank read from the inventory: open it once its text is in
         RE::FormID g_openingBlank = 0;  // the blank whose onOpen is running: the session it begins is for it
         RE::FormID g_sessionBlank = 0;  // the blank the session writes in, until a save replaces it
+        // Blanks that became books in the open menu (blank, book): the inventory shows them on its close.
+        std::vector<std::pair<RE::FormID, RE::FormID>> g_swapped;
 
         // The session is over: nothing of it is kept, and the client hears it once (onEnd), last.
         std::uint64_t g_sessionSerial = 0;  // bumped whenever a session ends: a client prompt answers only its own
@@ -235,6 +237,7 @@ namespace InkAndQuill::Editor {
             auto* blank = RE::TESForm::LookupByID<RE::TESBoundObject>(blankId);
             if (player && blank && CountCarried(blank) > 0) player->RemoveItem(blank, 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
             SetBookMenuBook(book);
+            g_swapped.emplace_back(blankId, bookId);
             SKSE::log::info("[Editor] Blank {:08X} became {:08X}", blankId, bookId);
             return true;
         }
@@ -350,13 +353,13 @@ namespace InkAndQuill::Editor {
             }
         }
 
-        void LeaveEditMode()
+        void LeaveEditMode(const char* why)
         {
             if (!g_active.exchange(false)) return;
             QuillCursor::Hide();
             g_prompting = false;
             SetTextInput(false);
-            SKSE::log::info("[Editor] Edit mode off");
+            SKSE::log::info("[Editor] Edit mode off: {}", why);
             EndSession();
         }
 
@@ -372,7 +375,7 @@ namespace InkAndQuill::Editor {
         // Close without asking: edit mode ends first, so the close hook lets it through.
         void CloseBook()
         {
-            LeaveEditMode();
+            LeaveEditMode("closing the book");
             RequestClose();
         }
 
@@ -400,7 +403,7 @@ namespace InkAndQuill::Editor {
             if (result == SaveResult::Unreadable) Notify(Strings::Get("$IQ_SaveFailed"));
             if (result == SaveResult::Unreadable || result == SaveResult::Refused) return;
             auto* movie = BookMovie();
-            LeaveEditMode();
+            LeaveEditMode(result == SaveResult::Saved ? "saved (edit key)" : "nothing to save (edit key)");
             // Saved without a reading text: the client closes the book.  Nothing saved: the SWF reads the text it had.
             if (result == SaveResult::Saved && text.empty()) {
                 SKSE::log::info("[Editor] No text to read again: closing the book");
@@ -555,6 +558,26 @@ namespace InkAndQuill::Editor {
 
         // ---- Menu and input ----
 
+        // The inventory shows one blank fewer and the client's book: an update naming an item queues it, and one naming
+        // none makes the menu redo the queued items' lines (InventoryMenu::ProcessMessage, AE id 51848).
+        void RefreshInventory(std::vector<std::pair<RE::FormID, RE::FormID>> swapped)
+        {
+            SKSE::GetTaskInterface()->AddTask([swapped = std::move(swapped)]() {
+                try {
+                    auto* player = RE::PlayerCharacter::GetSingleton();
+                    if (!player) return;
+                    for (const auto& [blank, book] : swapped) {
+                        SKSE::log::info("[Editor] Refreshing the inventory: blank {:08X} became {:08X}", blank, book);
+                        RE::SendUIMessage::SendInventoryUpdateMessage(player, RE::TESForm::LookupByID<RE::TESBoundObject>(book));
+                        RE::SendUIMessage::SendInventoryUpdateMessage(player, RE::TESForm::LookupByID<RE::TESBoundObject>(blank));
+                    }
+                    RE::SendUIMessage::SendInventoryUpdateMessage(player, nullptr);
+                } catch (const std::exception& e) {
+                    SKSE::log::error("[Editor] Refreshing the inventory failed: {}", e.what());
+                }
+            });
+        }
+
         class MenuSink : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
         public:
             RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
@@ -566,7 +589,9 @@ namespace InkAndQuill::Editor {
                 }
                 if (a_event && a_event->menuName == RE::BookMenu::MENU_NAME && !a_event->opening) {
                     g_bookOpen = false;
-                    LeaveEditMode();
+                    LeaveEditMode("the book menu closed");
+                    // Only now: refreshing it under the open book menu broke the menu's navigation (Physical Diaries).
+                    if (!g_swapped.empty()) RefreshInventory(std::exchange(g_swapped, {}));
                     g_blankOnOpen = 0;
                     // A session waiting for this menu that never began.
                     if (std::exchange(g_beginOnOpen, 0) != 0) EndSession();
@@ -684,7 +709,7 @@ namespace InkAndQuill::Editor {
                     return true;
                 }
                 if (!changes) SKSE::log::error("[Editor] Can't read the editor's text: closing without saving");
-                LeaveEditMode();
+                LeaveEditMode("a close request with nothing to save");
                 return false;
             }
 
@@ -711,6 +736,7 @@ namespace InkAndQuill::Editor {
 
     void OnEditKey(bool writing)
     {
+        SKSE::log::info("[Editor] Edit key ({})", writing ? "writing: save and read" : "reading: start writing");
         if (!writing) {
             QueueUI([]() { BeginFromKey(); });
             return;
