@@ -1,0 +1,167 @@
+/*
+ * Ink & Quill - a Skyrim SKSE writing framework: the player writes in books in the
+ * book menu, with quill, ink or blood, for any mod that gives the text a meaning.
+ * Copyright (C) 2026 Zevick
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "QuillPaper.h"
+
+namespace InkAndQuill::QuillPaper {
+
+    namespace {
+
+        struct Vertex {
+            RE::NiPoint3 position;  // in the skin's space
+            float u = 0.f, v = 0.f;
+            float weights[4] = {};
+            std::uint16_t bones[4] = {};  // the skin's bone indices
+        };
+
+        struct Sheet {
+            RE::NiPointer<RE::BSGeometry> shape;  // keeps the skin alive with it
+            std::vector<Vertex> vertices;
+            std::vector<std::array<std::uint16_t, 3>> triangles;
+        };
+
+        std::array<Sheet, 4> g_sheets;  // by page slot: "Base Page1" shows slot 0
+
+        // A skinned sheet's vertices and triangles, from its skin partitions' CPU copies (the shape keeps none).
+        Sheet ReadSheet(RE::BSGeometry* shape)
+        {
+            Sheet sheet;
+            auto* skin = shape->GetGeometryRuntimeData().skinInstance.get();
+            auto* partitions = skin ? skin->skinPartition.get() : nullptr;
+            if (!partitions) return sheet;
+            for (std::uint32_t p = 0; p < partitions->numPartitions; ++p) {
+                const auto& part = partitions->partitions[p];
+                const auto* buffer = part.buffData;
+                if (!buffer || !buffer->rawVertexData || !buffer->rawIndexData) continue;
+                const auto desc = part.vertexDesc;
+                if (!desc.HasFlag(RE::BSGraphics::Vertex::VF_UV) || !desc.HasFlag(RE::BSGraphics::Vertex::VF_SKINNED)) continue;
+                const auto stride = static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(desc) & 0xF) * 4;
+                const auto uvAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_TEXCOORD0);
+                const auto skinAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_SKINNING);
+                // Full floats when the UVs start 16 bytes in: a skinned sheet's are, though its flags say halves.
+                const bool full = uvAt >= 16;
+                const auto first = static_cast<std::uint16_t>(sheet.vertices.size());
+                for (std::uint16_t i = 0; i < part.vertices; ++i) {
+                    const auto* raw = buffer->rawVertexData + i * stride;
+                    Vertex vertex;
+                    if (full) {
+                        std::memcpy(&vertex.position, raw, sizeof(vertex.position));
+                    } else {
+                        std::uint16_t h[3];
+                        std::memcpy(h, raw, sizeof(h));
+                        vertex.position = { HalfToFloat(h[0]), HalfToFloat(h[1]), HalfToFloat(h[2]) };
+                    }
+                    std::uint16_t uv[2], weights[4];
+                    std::memcpy(uv, raw + uvAt, sizeof(uv));
+                    std::memcpy(weights, raw + skinAt, sizeof(weights));
+                    vertex.u = HalfToFloat(uv[0]), vertex.v = HalfToFloat(uv[1]);
+                    for (int k = 0; k < 4; ++k) {
+                        vertex.weights[k] = HalfToFloat(weights[k]);
+                        const auto local = raw[skinAt + 8 + k];  // into the partition's bones
+                        vertex.bones[k] = local < part.numBones ? part.bones[local] : 0;
+                    }
+                    sheet.vertices.push_back(vertex);
+                }
+                for (std::uint32_t t = 0; t < part.triangles; ++t) {
+                    const auto* index = buffer->rawIndexData + t * 3;
+                    sheet.triangles.push_back({ static_cast<std::uint16_t>(first + index[0]), static_cast<std::uint16_t>(first + index[1]),
+                                                static_cast<std::uint16_t>(first + index[2]) });
+                }
+            }
+            sheet.shape.reset(shape);
+            return sheet;
+        }
+
+        // A vertex where the sheet is now: its bones' current transforms, by its weights.
+        RE::NiPoint3 Skinned(const Vertex& vertex, RE::NiSkinInstance* skin)
+        {
+            auto* data = skin->skinData.get();
+            RE::NiPoint3 out;
+            float total = 0.f;
+            for (int k = 0; k < 4; ++k) {
+                const float w = vertex.weights[k];
+                auto* bone = skin->bones[vertex.bones[k]];
+                if (w <= 0.f || !bone || !data) continue;
+                out += (bone->world * data->GetBoneDataSkinToBone(vertex.bones[k])) * vertex.position * w;
+                total += w;
+            }
+            return total > 0.f ? out / total : vertex.position;
+        }
+
+    }
+
+    void Read(RE::NiAVObject* book)
+    {
+        Clear();
+        if (!book) return;
+        for (int slot = 0; slot < 4; ++slot) {
+            auto* object = book->GetObjectByName(std::format("Base Page{}", slot + 1));
+            auto* shape = object ? object->AsGeometry() : nullptr;
+            if (!shape) continue;
+            g_sheets[slot] = ReadSheet(shape);
+            SKSE::log::info("[Quill] Page slot {}: '{}', {} vertices, {} triangles", slot, object->name.c_str(),
+                            g_sheets[slot].vertices.size(), g_sheets[slot].triangles.size());
+        }
+    }
+
+    void Clear()
+    {
+        for (auto& sheet : g_sheets) sheet = {};
+    }
+
+    std::optional<RE::NiPoint3> At(int slot, float u, float v)
+    {
+        if (slot < 0 || slot >= static_cast<int>(g_sheets.size())) return std::nullopt;
+        const auto& sheet = g_sheets[slot];
+        auto* skin = sheet.shape ? sheet.shape->GetGeometryRuntimeData().skinInstance.get() : nullptr;
+        if (!skin) return std::nullopt;
+        // The triangle whose UVs hold (u, v), and where in it: its barycentric weights.
+        constexpr float kEdge = -1e-4f;
+        for (const auto& [i0, i1, i2] : sheet.triangles) {
+            const auto &a = sheet.vertices[i0], &b = sheet.vertices[i1], &c = sheet.vertices[i2];
+            const float det = (b.v - c.v) * (a.u - c.u) + (c.u - b.u) * (a.v - c.v);
+            if (std::abs(det) < 1e-12f) continue;
+            const float wa = ((b.v - c.v) * (u - c.u) + (c.u - b.u) * (v - c.v)) / det;
+            const float wb = ((c.v - a.v) * (u - c.u) + (a.u - c.u) * (v - c.v)) / det;
+            const float wc = 1.f - wa - wb;
+            if (wa < kEdge || wb < kEdge || wc < kEdge) continue;
+            return Skinned(a, skin) * wa + Skinned(b, skin) * wb + Skinned(c, skin) * wc;
+        }
+        return std::nullopt;
+    }
+
+    float HalfToFloat(std::uint16_t h)
+    {
+        const std::uint32_t sign = (h & 0x8000u) << 16;
+        std::uint32_t exponent = (h >> 10) & 0x1F, mantissa = h & 0x3FF;
+        if (exponent == 0) {
+            if (mantissa == 0) return std::bit_cast<float>(sign);
+            while (!(mantissa & 0x400)) {  // subnormal: normalise
+                mantissa <<= 1;
+                --exponent;
+            }
+            ++exponent;
+            mantissa &= 0x3FF;
+        } else if (exponent == 31) {
+            return std::bit_cast<float>(sign | 0x7F800000u | (mantissa << 13));
+        }
+        return std::bit_cast<float>(sign | ((exponent + 112) << 23) | (mantissa << 13));
+    }
+
+}

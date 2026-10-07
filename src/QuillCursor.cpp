@@ -19,6 +19,8 @@
 
 #include "QuillCursor.h"
 
+#include "QuillPaper.h"
+
 #include "BookMovie.h"
 #include "Keys.h"
 #include "Settings.h"
@@ -32,6 +34,8 @@ namespace InkAndQuill::QuillCursor {
     namespace {
 
         constexpr RE::FormID kQuill = 0x04C3C8;  // Skyrim.esm Quill01: its model, or a replacer's
+        // The nib in the model's own space: its tip, the vertex furthest down its long axis (-z; FindNib).
+        RE::NiPoint3 g_nib{ 0.f, 0.f, -12.f };
 
         RE::NiPointer<RE::NiNode> g_parent;
         RE::NiPointer<RE::NiAVObject> g_quill;
@@ -68,6 +72,8 @@ namespace InkAndQuill::QuillCursor {
         RE::NiPoint3 g_anchor;                           // the caret's point, in the page's space
         std::string g_caret;                             // book.swf's last answer (EditCaretPoint)
         std::optional<RE::NiPoint2> g_stagePoint;        // the caret on the stage, from it
+        int g_slot = 0;                                  // the engine's page slot the caret is on
+        std::optional<RE::NiPoint2> g_uv;                // the caret's point in the page texture
 
         // Adjust mode (Settings::kQuillAdjust): the numpad moves or turns the quill.
         bool g_turning = false;
@@ -146,6 +152,40 @@ namespace InkAndQuill::QuillCursor {
                             b.center.x, b.center.y, b.center.z, b.radius);
         }
 
+        // The quill's tip in its own space: the vertex furthest down its long axis (-z), over its shapes' CPU copies.
+        void FindNib(RE::NiAVObject* quill)
+        {
+            std::optional<RE::NiPoint3> tip;
+            const auto toQuill = quill->world.Invert();
+            RE::BSVisit::TraverseScenegraphGeometries(quill, [&](RE::BSGeometry* geometry) {
+                auto* shape = geometry->AsTriShape();
+                const auto* renderer = shape ? geometry->GetGeometryRuntimeData().rendererData : nullptr;
+                const auto* raw = renderer ? renderer->rawVertexData : nullptr;
+                if (!raw) return RE::BSVisit::BSVisitControl::kContinue;
+                const auto desc = geometry->GetGeometryRuntimeData().vertexDesc;
+                const auto stride = static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(desc) & 0xF) * 4;
+                const bool full = desc.HasFlag(RE::BSGraphics::Vertex::VF_UV) ? desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_TEXCOORD0) >= 16
+                                                                             : desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC);
+                const auto toModel = toQuill * geometry->world;
+                for (std::uint32_t i = 0; i < shape->GetTrishapeRuntimeData().vertexCount; ++i) {
+                    RE::NiPoint3 p;
+                    if (full) {
+                        std::memcpy(&p, raw + i * stride, sizeof(p));
+                    } else {
+                        std::uint16_t h[3];
+                        std::memcpy(h, raw + i * stride, sizeof(h));
+                        p = { QuillPaper::HalfToFloat(h[0]), QuillPaper::HalfToFloat(h[1]), QuillPaper::HalfToFloat(h[2]) };
+                    }
+                    p = toModel * p;
+                    if (!tip || p.z < tip->z) tip = p;
+                }
+                return RE::BSVisit::BSVisitControl::kContinue;
+            });
+            if (tip) g_nib = *tip;
+            SKSE::log::info("[Quill] Nib {} at ({:.3f}, {:.3f}, {:.3f}) in the model", tip ? "found" : "not found (a guess)", g_nib.x, g_nib.y,
+                            g_nib.z);
+        }
+
         // The model's collision would put it back where its physics body is on every update.
         void DropCollision(RE::NiAVObject* object)
         {
@@ -154,24 +194,6 @@ namespace InkAndQuill::QuillCursor {
             if (auto* node = object->AsNode()) {
                 for (const auto& child : node->GetChildren()) DropCollision(child.get());
             }
-        }
-
-        float HalfToFloat(std::uint16_t h)
-        {
-            const std::uint32_t sign = (h & 0x8000u) << 16;
-            std::uint32_t exponent = (h >> 10) & 0x1F, mantissa = h & 0x3FF;
-            if (exponent == 0) {
-                if (mantissa == 0) return std::bit_cast<float>(sign);
-                while (!(mantissa & 0x400)) {  // subnormal: normalise
-                    mantissa <<= 1;
-                    --exponent;
-                }
-                ++exponent;
-                mantissa &= 0x3FF;
-            } else if (exponent == 31) {
-                return std::bit_cast<float>(sign | 0x7F800000u | (mantissa << 13));
-            }
-            return std::bit_cast<float>(sign | ((exponent + 112) << 23) | (mantissa << 13));
         }
 
         // PageText's vertices: their positions and UVs give where any point of the page texture is.
@@ -207,11 +229,11 @@ namespace InkAndQuill::QuillCursor {
                 } else {
                     std::uint16_t h[3];
                     std::memcpy(h, vertex, sizeof(h));
-                    p = { HalfToFloat(h[0]), HalfToFloat(h[1]), HalfToFloat(h[2]) };
+                    p = { QuillPaper::HalfToFloat(h[0]), QuillPaper::HalfToFloat(h[1]), QuillPaper::HalfToFloat(h[2]) };
                 }
                 std::uint16_t uv[2];
                 std::memcpy(uv, vertex + uvAt, sizeof(uv));
-                const float u = HalfToFloat(uv[0]), v = HalfToFloat(uv[1]);
+                const float u = QuillPaper::HalfToFloat(uv[0]), v = QuillPaper::HalfToFloat(uv[1]);
                 SKSE::log::info("[Quill] PageText vertex {}: ({:.3f}, {:.3f}, {:.3f}) uv ({:.3f}, {:.3f}); stride {}, uv at {}", i, p.x,
                                 p.y, p.z, u, v, stride, uvAt);
                 quad.u0 = std::min(quad.u0, u), quad.u1 = std::max(quad.u1, u);
@@ -239,15 +261,28 @@ namespace InkAndQuill::QuillCursor {
             return menu ? menu->GetRuntimeData().pageTextGeo.get() : nullptr;
         }
 
-        // A point on the stage, on the page in its space, through the quad's UVs.
-        std::optional<RE::NiPoint3> OnPage(float gx, float gy)
+        // A point on the stage, on the page in its space.  The engine sets the movie's viewport to PageText's UV range
+        // (BookMenu setup, AE 0x1408f1ed0) and draws the texture on the "Base Page" sheets: the point is where the
+        // caret's slot's sheet shows that UV, as it's bent now.  Without one, on PageText's flat quad.
+        std::optional<RE::NiPoint3> OnPage(int slot, float gx, float gy)
         {
             const float width = g_visible.right - g_visible.left, height = g_visible.bottom - g_visible.top;
             if (!g_quad.valid || width <= 0.f || height <= 0.f) return std::nullopt;
             const auto& q = g_quad;
-            const float u = (gx - g_visible.left) / width, v = (gy - g_visible.top) / height;
+            const float u = q.u0 + (gx - g_visible.left) / width * (q.u1 - q.u0), v = q.v0 + (gy - g_visible.top) / height * (q.v1 - q.v0);
+            g_uv = RE::NiPoint2{ u, v };
+            if (const auto onSheet = QuillPaper::At(slot, u, v); onSheet && Page()) {
+                // On the page, or not used: a stray point once put the quill thousands of units off and hid the book.
+                const auto point = Page()->world.Invert() * *onSheet;
+                if (std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z) && std::abs(point.z) < 5.f) return point;
+                static bool said = false;
+                if (!std::exchange(said, true)) {
+                    SKSE::log::warn("[Quill] The sheet's point ({}, {}, {}) is off the page: the flat quad instead", point.x, point.y, point.z);
+                }
+            }
             // The page shows the texture turned half round on the quad (seen in game): both run the other way.
-            const float s = std::clamp((q.u1 - u) / (q.u1 - q.u0), 0.f, 1.f), t = std::clamp((q.v1 - v) / (q.v1 - q.v0), 0.f, 1.f);
+            const float s = std::clamp(1.f - (gx - g_visible.left) / width, 0.f, 1.f);
+            const float t = std::clamp(1.f - (gy - g_visible.top) / height, 0.f, 1.f);
             const auto top = q.p00 * (1.f - s) + q.p10 * s, bottom = q.p01 * (1.f - s) + q.p11 * s;
             return top * (1.f - t) + bottom * t;
         }
@@ -256,23 +291,88 @@ namespace InkAndQuill::QuillCursor {
         void FindAnchor(RE::NiAVObject* page)
         {
             g_caret = CaretPoint();
-            float side = 0.f, number = 0.f, x = 0.f, y = 0.f, gx = 0.f, gy = 0.f;
+            float side = 0.f, number = 0.f, x = 0.f, y = 0.f, gx = 0.f, gy = 0.f, slot = 0.f;
             std::optional<RE::NiPoint3> point;
             g_stagePoint.reset();
-            if (std::sscanf(g_caret.c_str(), "%f,%f,%f,%f,%f,%f", &side, &number, &x, &y, &gx, &gy) == 6) {
+            g_uv.reset();
+            if (std::sscanf(g_caret.c_str(), "%f,%f,%f,%f,%f,%f,%f", &side, &number, &x, &y, &gx, &gy, &slot) >= 6) {
                 g_stagePoint = RE::NiPoint2{ gx, gy };
-                point = OnPage(gx, gy);
+                g_slot = static_cast<int>(slot);
+                point = OnPage(g_slot, gx, gy);
             }
             g_anchor = point ? *point : page->world.Invert() * page->worldBound.center;
         }
 
-        // Where the quill is on the page for the caret now.
+        // The book menu's 3D scene camera (UI3DSceneManager's: the book menu places the book with it).
+        RE::NiCamera* Camera()
+        {
+            auto* scene = RE::UI3DSceneManager::GetSingleton();
+            return scene ? scene->camera.get() : nullptr;
+        }
+
+        // The page's centre on the paper: the pose is the quill's place with the caret there.
+        // The caret's slot's sheet at texture point (u, v), in the page's space, if it's on the page.
+        std::optional<RE::NiPoint3> SheetPoint(float u, float v)
+        {
+            const auto onSheet = QuillPaper::At(g_slot, u, v);
+            if (!onSheet || !Page()) return std::nullopt;
+            const auto point = Page()->world.Invert() * *onSheet;
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) || std::abs(point.z) >= 5.f) return std::nullopt;
+            return point;
+        }
+
+        RE::NiPoint2 CentreUv() { return { (g_quad.u0 + g_quad.u1) / 2.f, (g_quad.v0 + g_quad.v1) / 2.f }; }
+
+        RE::NiPoint3 PageCentre()
+        {
+            const auto uv = CentreUv();
+            if (const auto point = SheetPoint(uv.x, uv.y)) return *point;
+            return (g_quad.p00 + g_quad.p11) / 2.f;
+        }
+
+        // The spot `beside` (page units, from the centre's point) as a texture offset there, so it bends with the paper.
+        std::optional<RE::NiPoint2> UvOffset(const RE::NiPoint3& beside)
+        {
+            constexpr float kStep = 0.01f;
+            const auto uv = CentreUv();
+            const auto at = SheetPoint(uv.x, uv.y), du = SheetPoint(uv.x + kStep, uv.y), dv = SheetPoint(uv.x, uv.y + kStep);
+            if (!at || !du || !dv) return std::nullopt;
+            const auto ju = (*du - *at) / kStep, jv = (*dv - *at) / kStep;  // page units per texture unit
+            const float det = ju.x * jv.y - jv.x * ju.y;
+            if (std::abs(det) < 1e-6f) return std::nullopt;
+            return RE::NiPoint2{ (beside.x * jv.y - jv.x * beside.y) / det, (ju.x * beside.y - beside.x * ju.y) / det };
+        }
+
+        // Where the quill is on the page for the caret now.  The nib rides the camera's ray through a point beside the
+        // caret's (on the paper, at the caret's depth), at the depth the pose gives it: its image stays on the caret
+        // wherever the paper bends (docs/EDITOR.md#quill-cursor).
         RE::NiPoint3 Translate()
         {
-            if (!g_track.valid) return g_anchor + g_pose.translate;
-            if (!g_stagePoint) return g_pose.translate;
-            return g_pose.translate +
-                   RE::NiPoint3{ g_track.kx * (g_stagePoint->x - g_track.gx), g_track.ky * (g_stagePoint->y - g_track.gy), 0.f };
+            if (g_track.valid) {
+                if (!g_stagePoint) return g_pose.translate;
+                return g_pose.translate +
+                       RE::NiPoint3{ g_track.kx * (g_stagePoint->x - g_track.gx), g_track.ky * (g_stagePoint->y - g_track.gy), 0.f };
+            }
+            auto* page = Page();
+            auto* camera = Camera();
+            const auto centre = PageCentre();
+            if (!page || !camera || camera->GetRuntimeData2().viewFrustum.bOrtho) return g_anchor + g_pose.translate;
+            const auto eye = page->world.Invert() * camera->world.translate;
+            const auto nibOffset = g_pose.rotate * g_nib * g_pose.scale;
+            const auto nibThere = centre + g_pose.translate + nibOffset;  // with the caret at the centre
+            // Where the ray through the nib meets the paper's plane there, and how far along it the nib is.
+            const float run = nibThere.z - eye.z;
+            if (std::abs(run) < 1e-4f) return g_anchor + g_pose.translate;
+            const float t = (centre.z - eye.z) / run;
+            if (t <= 1.f) return g_anchor + g_pose.translate;
+            const auto beside = (eye + (nibThere - eye) * t) - centre;  // the nib's spot on the paper, from the caret's
+            // The spot keeps its place against the text: the same texture offset from the caret's, on the bent paper.
+            auto spot = g_anchor + beside;
+            if (const auto offset = g_uv ? UvOffset(beside) : std::nullopt) {
+                if (const auto onSheet = SheetPoint(g_uv->x + offset->x, g_uv->y + offset->y)) spot = *onSheet;
+            }
+            const auto nib = eye + (spot - eye) / t;
+            return nib - nibOffset;
         }
 
         // Numpad 1: the nib lined up on the caret here.  The second, far from the first, calibrates tracking.
@@ -311,6 +411,7 @@ namespace InkAndQuill::QuillCursor {
             FindAnchor(page);
             RE::NiTransform onPage;
             onPage.translate = Translate();
+            if (!std::isfinite(onPage.translate.x) || !std::isfinite(onPage.translate.y) || !std::isfinite(onPage.translate.z)) return;
             onPage.rotate = g_pose.rotate;
             onPage.scale = g_pose.scale;
             g_quill->local = g_parent->world.Invert() * (page->world * onPage);
@@ -328,7 +429,21 @@ namespace InkAndQuill::QuillCursor {
                             "{:.4f} {:.4f} {:.4f}] caret {}",
                             what, t.x, t.y, t.z, g_pose.scale, r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0],
                             r[2][1], r[2][2], g_caret);
-            SKSE::log::info("[Quill]   caret's point on the page ({:.3f}, {:.3f}, {:.3f})", g_anchor.x, g_anchor.y, g_anchor.z);
+            SKSE::log::info("[Quill]   caret's point on the page ({:.3f}, {:.3f}, {:.3f}), slot {}", g_anchor.x, g_anchor.y, g_anchor.z,
+                            g_slot);
+            // Where the scene camera puts them on screen (0-1), to compare with a screenshot.
+            auto* camera = Camera();
+            auto* page = Page();
+            if (!camera || !page || !g_quill) return;
+            const auto screen = [camera](const RE::NiPoint3& world) {
+                float x = 0.f, y = 0.f, z = 0.f;
+                camera->WorldPtToScreenPt3(world, x, y, z, 1e-5f);
+                return std::format("({:.4f}, {:.4f})", x, y);
+            };
+            const auto& w = page->world;
+            SKSE::log::info("[Quill]   on screen: caret {} nib {}; page corners uv00 {} uv10 {} uv01 {} uv11 {}", screen(w * g_anchor),
+                            screen(g_quill->world * g_nib), screen(w * g_quad.p00), screen(w * g_quad.p10), screen(w * g_quad.p01),
+                            screen(w * g_quad.p11));
         }
 
         // A move or turn along a world axis (the camera's: x across, y toward it, z up), in the page's space.
@@ -390,14 +505,17 @@ namespace InkAndQuill::QuillCursor {
         RE::NiUpdateData update{};
         quill->Update(update);  // its own size, before it's on the book
         g_size = quill->worldBound.radius;
+        FindNib(quill);
         book->AttachChild(quill);
         g_parent.reset(book);
         g_quill.reset(quill);
         g_model = data.isNote ? "Note" : "Book";
         g_quad = ReadQuad(data.pageTextGeo.get());
+        QuillPaper::Read(book);
         g_visible = data.book ? data.book->GetVisibleFrameRect() : RE::GRectF{};
-        SKSE::log::info("[Quill] Visible stage ({}, {}) to ({}, {}); quad {}", g_visible.left, g_visible.top, g_visible.right,
-                        g_visible.bottom, g_quad.valid ? "read" : "not read");
+        SKSE::log::info("[Quill] Visible stage ({}, {}) to ({}, {}); quad {}, UVs u {:.3f}-{:.3f} v {:.3f}-{:.3f}", g_visible.left,
+                        g_visible.top, g_visible.right, g_visible.bottom, g_quad.valid ? "read" : "not read", g_quad.u0, g_quad.u1,
+                        g_quad.v0, g_quad.v1);
         g_track = {};
         g_firstPoint.reset();
         if (!LoadPose()) ResetPose();
@@ -410,6 +528,20 @@ namespace InkAndQuill::QuillCursor {
                         inBook.translate.x, inBook.translate.y, inBook.translate.z, inBook.scale, r[0][0], r[0][1], r[0][2], r[1][0],
                         r[1][1], r[1][2], r[2][0], r[2][1], r[2][2]);
         LogPose(std::format("on '{}' (note {}):", book->name.c_str(), data.isNote));
+        if (auto* camera = Camera()) {
+            const auto& w = camera->world;
+            const auto& f = camera->GetRuntimeData2().viewFrustum;
+            const auto onPage = data.pageTextGeo->world.Invert() * w.translate;
+            SKSE::log::info("[Quill] camera '{}': world ({:.2f}, {:.2f}, {:.2f}) rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} "
+                            "{:.4f}]; frustum l {:.4f} r {:.4f} t {:.4f} b {:.4f} near {:.2f} far {:.2f} ortho {}; on the page ({:.2f}, "
+                            "{:.2f}, {:.2f})",
+                            camera->name.c_str(), w.translate.x, w.translate.y, w.translate.z, w.rotate.entry[0][0], w.rotate.entry[0][1],
+                            w.rotate.entry[0][2], w.rotate.entry[1][0], w.rotate.entry[1][1], w.rotate.entry[1][2], w.rotate.entry[2][0],
+                            w.rotate.entry[2][1], w.rotate.entry[2][2], f.fLeft, f.fRight, f.fTop, f.fBottom, f.fNear, f.fFar, f.bOrtho,
+                            onPage.x, onPage.y, onPage.z);
+        } else {
+            SKSE::log::warn("[Quill] No 3D scene camera");
+        }
     }
 
     void Follow() { Apply(); }
@@ -419,6 +551,7 @@ namespace InkAndQuill::QuillCursor {
         if (g_parent && g_quill) g_parent->DetachChild(g_quill.get());
         g_quill.reset();
         g_parent.reset();
+        QuillPaper::Clear();
     }
 
     bool Adjust(std::uint32_t scanCode)

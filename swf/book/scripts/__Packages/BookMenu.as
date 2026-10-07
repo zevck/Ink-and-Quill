@@ -1120,8 +1120,9 @@ class BookMenu extends MovieClip
    }
 
 
-   // The quill cursor's point: "side,page,x,y,gx,gy". side: 0 the left page (or a note), 1 the right; x, y: the caret's
-   // left edge and its line's bottom, in the field's units from the top of its page; gx, gy: that point on the stage.
+   // The quill cursor's point: "side,page,x,y,gx,gy,slot". side: 0 the left page (or a note), 1 the right; x, y: the caret's
+   // left edge and its line's bottom, in the field's units from the top of its page; gx, gy: that point on the stage; slot:
+   // the engine's page slot showing it.
    function EditCaretPoint()
    {
       var tf = this.EditField;
@@ -1150,7 +1151,8 @@ class BookMenu extends MovieClip
       // ShowEditPage puts a page's top at the clip's top (the field's _y = 2 - that top), so y is the clip's y.
       var pt = {x:x + tf._x, y:y};
       this.EditClip.localToGlobal(pt);
-      return side + "," + page + "," + x + "," + y + "," + pt.x + "," + pt.y;
+      var slot = this.bNote ? 0 : this.iEditShownFrom + side;
+      return side + "," + page + "," + x + "," + y + "," + pt.x + "," + pt.y + "," + slot;
    }
 
    // ---- Suggestions (inline completion, docs/EDITOR.md#suggestions) ----

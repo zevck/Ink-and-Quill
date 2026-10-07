@@ -36,6 +36,7 @@ set(sources
     src/Keys.cpp
     src/Papyrus.cpp
     src/QuillCursor.cpp
+    src/QuillPaper.cpp
     src/Settings.cpp
     src/Strings.cpp
     src/Suggestions.cpp
