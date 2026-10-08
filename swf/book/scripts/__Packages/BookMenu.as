@@ -1147,7 +1147,7 @@ class BookMenu extends MovieClip
          y += tf.getLineMetrics(i).height;
          i++;
       }
-      var side = this.bNote ? 0 : page - this.iEditPage;
+      var side = this.bNote ? 0 : page - this.EditSpreadLeft();   // the engine draws slot k as EditSpreadLeft() - iEditShownFrom + k
       // ShowEditPage puts a page's top at the clip's top (the field's _y = 2 - that top), so y is the clip's y.
       var pt = {x:x + tf._x, y:y};
       this.EditClip.localToGlobal(pt);

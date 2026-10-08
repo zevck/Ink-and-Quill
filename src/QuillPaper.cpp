@@ -115,8 +115,18 @@ namespace InkAndQuill::QuillPaper {
             auto* shape = object ? object->AsGeometry() : nullptr;
             if (!shape) continue;
             g_sheets[slot] = ReadSheet(shape);
-            SKSE::log::info("[Quill] Page slot {}: '{}', {} vertices, {} triangles", slot, object->name.c_str(),
-                            g_sheets[slot].vertices.size(), g_sheets[slot].triangles.size());
+            float u0 = FLT_MAX, u1 = -FLT_MAX, v0 = FLT_MAX, v1 = -FLT_MAX;
+            for (const auto& vertex : g_sheets[slot].vertices) u0 = std::min(u0, vertex.u), v0 = std::min(v0, vertex.v);
+            // A book's sheets are shifted whole textures along (u 2.0 to 2.74 shows u 0 to 0.74: the texture repeats):
+            // taken off, so their UVs are the movie's (a hair below a whole number isn't a shift).
+            const float shiftU = std::floor(u0 + 0.01f), shiftV = std::floor(v0 + 0.01f);
+            for (auto& vertex : g_sheets[slot].vertices) {
+                vertex.u -= shiftU, vertex.v -= shiftV;
+                u1 = std::max(u1, vertex.u), v1 = std::max(v1, vertex.v);
+            }
+            u0 -= shiftU, v0 -= shiftV;
+            SKSE::log::info("[Quill] Page slot {}: '{}', {} vertices, {} triangles, UVs u {:.3f}-{:.3f} v {:.3f}-{:.3f}", slot,
+                            object->name.c_str(), g_sheets[slot].vertices.size(), g_sheets[slot].triangles.size(), u0, u1, v0, v1);
         }
     }
 
@@ -143,6 +153,8 @@ namespace InkAndQuill::QuillPaper {
             if (wa < kEdge || wb < kEdge || wc < kEdge) continue;
             return Skinned(a, skin) * wa + Skinned(b, skin) * wb + Skinned(c, skin) * wc;
         }
+        static std::array<bool, 4> said{};
+        if (!std::exchange(said[slot], true)) SKSE::log::warn("[Quill] Page slot {}: no triangle shows UV ({:.3f}, {:.3f})", slot, u, v);
         return std::nullopt;
     }
 
