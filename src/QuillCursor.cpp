@@ -26,6 +26,7 @@
 #include "Settings.h"
 
 #include <Windows.h>
+#include <chrono>
 #include <numbers>
 #include <sstream>
 
@@ -80,6 +81,25 @@ namespace InkAndQuill::QuillCursor {
         std::string g_caret;                             // book.swf's last answer (EditCaretPoint)
         std::optional<RE::NiPoint2> g_stagePoint;        // the caret on the stage, from it
         int g_slot = 0;                                  // the engine's page slot the caret is on
+
+        // The writing wiggle: a sway about the nib, across the screen, fading after the last typed key (Wrote).
+        using Clock = std::chrono::steady_clock;
+        constexpr float kWiggleDegrees = 1.5f;  // at its widest
+        constexpr float kWiggleHz = 5.f;
+        constexpr float kWiggleFade = 0.15f;    // seconds for it to fall to about a third
+        std::optional<Clock::time_point> g_wiggleBegan, g_lastWrote;  // the swing's start (its phase), the last key
+
+        // Its angle now, in radians: 0 once it has faded.
+        float WiggleAngle()
+        {
+            if (!g_lastWrote || !g_wiggleBegan) return 0.f;
+            const auto now = Clock::now();
+            const float since = std::chrono::duration<float>(now - *g_lastWrote).count();
+            if (since > 5.f * kWiggleFade) return 0.f;
+            const float phase = std::chrono::duration<float>(now - *g_wiggleBegan).count();
+            const float degrees = kWiggleDegrees * std::sin(2.f * std::numbers::pi_v<float> * kWiggleHz * phase) * std::exp(-since / kWiggleFade);
+            return degrees * std::numbers::pi_v<float> / 180.f;
+        }
 
         // Adjust mode (Settings::kQuillAdjust): the numpad moves or turns the quill.
         bool g_turning = false;
@@ -170,8 +190,8 @@ namespace InkAndQuill::QuillCursor {
                             g_nib.z);
         }
 
-        // The book menu's scene ignores alpha testing (HFs' feather card drew solid): such shapes are blended and write no
-        // depth instead, on copies of their properties so the world's quills keep theirs.
+        // The book menu's scene ignores alpha testing (HFs' feather card drew solid): such shapes are blended instead, on a
+        // copy of the property.  They keep writing depth (without it the nib drew its inside over its outside).
         void BlendCutouts(RE::NiAVObject* quill)
         {
             RE::BSVisit::TraverseScenegraphGeometries(quill, [](RE::BSGeometry* geometry) {
@@ -188,12 +208,6 @@ namespace InkAndQuill::QuillCursor {
                 blend->SetSrcBlendMode(RE::NiAlphaProperty::AlphaFunction::kSrcAlpha);
                 blend->SetDestBlendMode(RE::NiAlphaProperty::AlphaFunction::kInvSrcAlpha);
                 data.alphaProperty.reset(blend);
-                if (const RE::NiPointer<RE::NiObject> shaderCopy{ data.shaderProperty ? data.shaderProperty->Clone() : nullptr }) {
-                    if (auto* shader = skyrim_cast<RE::BSShaderProperty*>(shaderCopy.get())) {
-                        shader->SetFlags(RE::BSShaderProperty::EShaderPropertyFlag8::kZBufferWrite, false);
-                        data.shaderProperty.reset(shader);
-                    }
-                }
                 SKSE::log::info("[Quill] Shape '{}' is alpha tested: blended instead", geometry->name.c_str());
                 return RE::BSVisit::BSVisitControl::kContinue;
             });
@@ -368,8 +382,18 @@ namespace InkAndQuill::QuillCursor {
                 return;
             }
             if (!g_placed && ++g_waited == kPlaceTimeout) RestoreCaret();
-            const auto world = g_view ? ViewWorld(*g_view) : std::nullopt;
+            auto world = g_view ? ViewWorld(*g_view) : std::nullopt;
             if (!world) return;
+            // Writing: swayed about the nib (it stays on the text), around the line of sight.
+            if (const float angle = WiggleAngle(); angle != 0.f) {
+                if (auto* camera = Camera()) {
+                    RE::NiMatrix3 turn;
+                    turn.MakeRotation(angle, camera->world.rotate * RE::NiPoint3{ 1.f, 0.f, 0.f });  // a camera looks along +x
+                    const auto nib = *world * g_nib;
+                    world->rotate = turn * world->rotate;
+                    world->translate = nib - world->rotate * (g_nib * world->scale);
+                }
+            }
             const auto& t = world->translate;
             if (!std::isfinite(t.x) || !std::isfinite(t.y) || !std::isfinite(t.z)) return;
             g_quill->local = g_parent->world.Invert() * *world;
@@ -502,6 +526,14 @@ namespace InkAndQuill::QuillCursor {
     }
 
     void Follow() { Apply(); }
+
+    void Wrote()
+    {
+        const auto now = Clock::now();
+        // A fresh swing starts at rest; one still going keeps its phase, so typing on doesn't jerk it.
+        if (!g_lastWrote || std::chrono::duration<float>(now - *g_lastWrote).count() > 5.f * kWiggleFade) g_wiggleBegan = now;
+        g_lastWrote = now;
+    }
 
     void Hide()
     {

@@ -624,13 +624,20 @@ namespace InkAndQuill::Editor {
             static inline REL::Relocation<decltype(thunk)> func;
         };
 
+        // Text typed at the caret (a key, Enter, a paste, a suggestion): the quill wiggles as it writes.
+        void Type(const char* text)
+        {
+            Invoke("AppendEditChar", text);
+            Changed();
+            QuillCursor::Wrote();
+        }
+
         void HandleKey(std::uint32_t scanCode)
         {
             if (QuillCursor::Adjust(scanCode)) return;
             if (std::string accepted; Suggestions::HandleKey(scanCode, accepted)) {
                 if (!accepted.empty() && CanWrite()) {
-                    Invoke("AppendEditChar", accepted.c_str());
-                    Changed();
+                    Type(accepted.c_str());
                 }
                 return;
             }
@@ -657,8 +664,7 @@ namespace InkAndQuill::Editor {
             }
             if (scanCode == kEnter) {
                 if (CanWrite()) {
-                    Invoke("AppendEditChar", "\n");
-                    Changed();
+                    Type("\n");
                 }
                 return;
             }
@@ -673,8 +679,7 @@ namespace InkAndQuill::Editor {
             if ((keyState[VK_CONTROL] & 0x80) && !(keyState[VK_MENU] & 0x80)) {
                 if (vk == 'V' && CanWrite()) {
                     if (const auto text = Clipboard::ReadForTyping(); !text.empty()) {
-                        Invoke("AppendEditChar", text.c_str());
-                        Changed();
+                        Type(text.c_str());
                     }
                 } else if (vk == 'C') {
                     const auto run = CaretEntry();
@@ -690,8 +695,7 @@ namespace InkAndQuill::Editor {
             }
             if (typed.empty()) return;
             if (CanWrite()) {
-                Invoke("AppendEditChar", Strings::Utf8(typed).c_str());
-                Changed();
+                Type(Strings::Utf8(typed).c_str());
             }
         }
 

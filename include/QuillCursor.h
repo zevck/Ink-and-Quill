@@ -32,6 +32,9 @@ namespace InkAndQuill::QuillCursor {
     // Every frame of the book menu: the quill follows the book (it moves as it opens).
     void Follow();
 
+    // Text was typed (not the caret moved, not text erased): the quill wiggles a moment, as if writing it.
+    void Wrote();
+
     // Development (Settings::kQuillAdjust): a numpad key moves, turns or scales the quill, or logs
     // its pose with the caret's point.  True when the key was the quill's.  See docs/EDITOR.md#quill-cursor.
     bool Adjust(std::uint32_t scanCode);
