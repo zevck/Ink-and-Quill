@@ -31,7 +31,9 @@ namespace InkAndQuill::QuillPaper {
     // The point of page slot `slot`'s sheet that shows texture point (u, v), in the world, as the sheet is bent now.
     std::optional<RE::NiPoint3> At(int slot, float u, float v);
 
-    // A vertex buffer's 16-bit float.
+    // A vertex buffer's 16-bit float; its stride (the descriptor's low nibble, in 4 bytes); a vertex's position.
     float HalfToFloat(std::uint16_t h);
+    std::uint32_t Stride(const RE::BSGraphics::VertexDesc& desc);
+    RE::NiPoint3 Position(const std::uint8_t* vertex, bool full);
 
 }

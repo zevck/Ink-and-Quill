@@ -38,51 +38,48 @@ namespace InkAndQuill::QuillPaper {
 
         std::array<Sheet, 4> g_sheets;  // by page slot: "Base Page1" shows slot 0
 
-        // A skinned sheet's vertices and triangles, from its skin partitions' CPU copies (the shape keeps none).
+        // A skinned sheet's vertices and triangles, from its skin partition's CPU copy (the shape keeps none).  One
+        // partition only: several share one buffer in ways not read here, so such a sheet gets the flat quad.
         Sheet ReadSheet(RE::BSGeometry* shape)
         {
             Sheet sheet;
             auto* skin = shape->GetGeometryRuntimeData().skinInstance.get();
             auto* partitions = skin ? skin->skinPartition.get() : nullptr;
-            if (!partitions) return sheet;
-            for (std::uint32_t p = 0; p < partitions->numPartitions; ++p) {
-                const auto& part = partitions->partitions[p];
-                const auto* buffer = part.buffData;
-                if (!buffer || !buffer->rawVertexData || !buffer->rawIndexData) continue;
-                const auto desc = part.vertexDesc;
-                if (!desc.HasFlag(RE::BSGraphics::Vertex::VF_UV) || !desc.HasFlag(RE::BSGraphics::Vertex::VF_SKINNED)) continue;
-                const auto stride = static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(desc) & 0xF) * 4;
-                const auto uvAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_TEXCOORD0);
-                const auto skinAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_SKINNING);
-                // Full floats when the UVs start 16 bytes in: a skinned sheet's are, though its flags say halves.
-                const bool full = uvAt >= 16;
-                const auto first = static_cast<std::uint16_t>(sheet.vertices.size());
-                for (std::uint16_t i = 0; i < part.vertices; ++i) {
-                    const auto* raw = buffer->rawVertexData + i * stride;
-                    Vertex vertex;
-                    if (full) {
-                        std::memcpy(&vertex.position, raw, sizeof(vertex.position));
-                    } else {
-                        std::uint16_t h[3];
-                        std::memcpy(h, raw, sizeof(h));
-                        vertex.position = { HalfToFloat(h[0]), HalfToFloat(h[1]), HalfToFloat(h[2]) };
-                    }
-                    std::uint16_t uv[2], weights[4];
-                    std::memcpy(uv, raw + uvAt, sizeof(uv));
-                    std::memcpy(weights, raw + skinAt, sizeof(weights));
-                    vertex.u = HalfToFloat(uv[0]), vertex.v = HalfToFloat(uv[1]);
-                    for (int k = 0; k < 4; ++k) {
-                        vertex.weights[k] = HalfToFloat(weights[k]);
-                        const auto local = raw[skinAt + 8 + k];  // into the partition's bones
-                        vertex.bones[k] = local < part.numBones ? part.bones[local] : 0;
-                    }
-                    sheet.vertices.push_back(vertex);
+            if (!partitions || partitions->numPartitions != 1) {
+                SKSE::log::warn("[Quill] '{}' has {} skin partitions: the quill uses the flat quad on it", shape->name.c_str(),
+                                partitions ? partitions->numPartitions : 0);
+                return sheet;
+            }
+            const auto& part = partitions->partitions[0];
+            const auto* buffer = part.buffData;
+            const auto desc = part.vertexDesc;
+            if (!buffer || !buffer->rawVertexData || !buffer->rawIndexData || !desc.HasFlag(RE::BSGraphics::Vertex::VF_UV) ||
+                !desc.HasFlag(RE::BSGraphics::Vertex::VF_SKINNED)) {
+                return sheet;
+            }
+            const auto stride = Stride(desc);
+            const auto uvAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_TEXCOORD0);
+            const auto skinAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_SKINNING);
+            const bool full = uvAt >= 16;  // a skinned sheet's are full floats, though its flags say halves
+            for (std::uint16_t i = 0; i < part.vertices; ++i) {
+                const auto* raw = buffer->rawVertexData + i * stride;
+                Vertex vertex;
+                vertex.position = Position(raw, full);
+                std::uint16_t uv[2], weights[4];
+                std::memcpy(uv, raw + uvAt, sizeof(uv));
+                std::memcpy(weights, raw + skinAt, sizeof(weights));
+                vertex.u = HalfToFloat(uv[0]), vertex.v = HalfToFloat(uv[1]);
+                for (int k = 0; k < 4; ++k) {
+                    vertex.weights[k] = HalfToFloat(weights[k]);
+                    const auto local = raw[skinAt + 8 + k];  // into the partition's bones
+                    vertex.bones[k] = local < part.numBones ? part.bones[local] : 0;
                 }
-                for (std::uint32_t t = 0; t < part.triangles; ++t) {
-                    const auto* index = buffer->rawIndexData + t * 3;
-                    sheet.triangles.push_back({ static_cast<std::uint16_t>(first + index[0]), static_cast<std::uint16_t>(first + index[1]),
-                                                static_cast<std::uint16_t>(first + index[2]) });
-                }
+                sheet.vertices.push_back(vertex);
+            }
+            for (std::uint32_t t = 0; t < part.triangles; ++t) {
+                const auto* index = buffer->rawIndexData + t * 3;
+                if (index[0] >= part.vertices || index[1] >= part.vertices || index[2] >= part.vertices) continue;
+                sheet.triangles.push_back({ index[0], index[1], index[2] });
             }
             sheet.shape.reset(shape);
             return sheet;
@@ -156,6 +153,23 @@ namespace InkAndQuill::QuillPaper {
         static std::array<bool, 4> said{};
         if (!std::exchange(said[slot], true)) SKSE::log::warn("[Quill] Page slot {}: no triangle shows UV ({:.3f}, {:.3f})", slot, u, v);
         return std::nullopt;
+    }
+
+    std::uint32_t Stride(const RE::BSGraphics::VertexDesc& desc)
+    {
+        return static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(desc) & 0xF) * 4;
+    }
+
+    RE::NiPoint3 Position(const std::uint8_t* vertex, bool full)
+    {
+        if (full) {
+            RE::NiPoint3 p;
+            std::memcpy(&p, vertex, sizeof(p));
+            return p;
+        }
+        std::uint16_t h[3];
+        std::memcpy(h, vertex, sizeof(h));
+        return { HalfToFloat(h[0]), HalfToFloat(h[1]), HalfToFloat(h[2]) };
     }
 
     float HalfToFloat(std::uint16_t h)

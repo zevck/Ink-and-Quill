@@ -15,7 +15,7 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
 | `Writing.QuillCursor` | 1 | 0–1 | While writing, the game's quill sits at the caret, in place of the blinking caret. 0: the plain caret ([EDITOR.md](EDITOR.md#quill-cursor)) |
 | `Debug.QuillAdjust` | 0 | 0–1 | MCM "Quill adjust mode": shows the quill whatever `Writing.QuillCursor` says, keeps the real caret beside it, and lets the numpad pose it ([EDITOR.md](EDITOR.md#quill-cursor)) |
-| `Debug.Logging` | 0 | 0–1 | MCM "Debug logging": `InkAndQuill.log` at debug level (the quill's per-frame lines: the page's vertices and sheets, the camera, where things land on screen), set at once and at load |
+| `Debug.Logging` | 0 | 0–1 | MCM "Debug logging": `InkAndQuill.log` at debug level, written to disk line by line: adds the quill's details each time a book opens (the page's vertices and sheets, the camera) and, in adjust mode, where the caret, nib and page corners land on screen. Takes effect as soon as it's changed |
 
 The key is a DirectX scan code, not one that types (while writing it couldn't also type). The MCM refuses, with a message, a code that isn't a keyboard key (SkyUI also offers mouse and gamepad buttons, 256 and up) or a key that types or edits (`GetKeyProblem`, i.e. `Keys::Check`, also used for clients' keys: Escape, Backspace, Enter, Delete, the arrows, Home, End, the modifiers, and anything that gives a character with the player's layout). It doesn't check conflicts: it only acts while a book is open, where game controls don't apply. Clients' own keys (Physical Diaries' new entry and tear-out) are theirs, in their own settings.
 
@@ -37,7 +37,7 @@ Inkwells = 0x000801~ScribesInk.esl
 
 ## The MCM
 
-One page. Left: the edit key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off. Right: **the mods using Ink & Quill**.
+One page. Left: the edit key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost, quill at the cursor). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off; the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
 
 The natives (`InkAndQuill_MCM`, global): `GetSetting`, `SetSetting`, `GetSettingDefault`, `GetSettingMin`, `GetSettingMax` by `"Section.Key"` (any case; an unknown name reads 0, logged), `GetKeyProblem`, and `GetClientCount`, `GetClientName`.
 

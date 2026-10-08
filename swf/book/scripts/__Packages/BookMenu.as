@@ -53,7 +53,7 @@ class BookMenu extends MovieClip
    var EditMask;         // shows one page of EditField
    var iSuppressTurnUntil;   // getTimer() before which engine page turns are refused (key presses)
    var bHideCaret;       // the quill shows the caret: the field can't be typed in (it draws no caret), iCaretPos is it
-   var iCaretPos;
+   var iCaretPos;        // -1: no caret (EditSetCaretOrNone)
    var iEditShownFrom;   // books: offset of the engine's current spread in its 4 page slots (0 or 2)
    var aSegs;            // the text as segments: {locked, body, editable} lengths, in order (see EditBuildMarked)
    var oContentFmt;      // entry text's format (config font, content size)
@@ -858,6 +858,10 @@ class BookMenu extends MovieClip
    // the blank or title page would look editable.
    function EditSetCaretOrNone(pos)
    {
+      if(pos < 0 && this.bHideCaret)
+      {
+         this.iCaretPos = -1;
+      }
       if(pos < 0)
       {
          // Unfocusing alone still draws the caret: a field that can't be typed in draws none.
@@ -1123,14 +1127,22 @@ class BookMenu extends MovieClip
    }
 
 
-   // The quill cursor's point: "side,page,x,y,gx,gy,slot". side: 0 the left page (or a note), 1 the right; x, y: the caret's
-   // left edge and its line's bottom, in the field's units from the top of its page; gx, gy: that point on the stage; slot:
-   // the engine's page slot showing it.
+   // The quill's point, "side,page,x,y,gx,gy,slot" (docs/EDITOR.md#quill-cursor), or "" with no caret or one on a page
+   // that isn't shown (paging to a title page keeps the caret where it was).
    function EditCaretPoint()
    {
       var tf = this.EditField;
+      if(tf == undefined || !this.EditHasCaret())
+      {
+         return "";
+      }
       var pos = this.EditCaret();
       var page = this.PageOfPos(pos);
+      var side = this.bNote ? page - this.iEditPage : page - this.EditSpreadLeft();   // slot k shows EditSpreadLeft() - iEditShownFrom + k
+      if(side < 0 || side > (this.bNote ? 0 : 1))
+      {
+         return "";
+      }
       var line = pos >= tf.length ? tf.numLines - 1 : tf.getLineIndexOfChar(pos);
       var r = pos < tf.length ? tf.getCharBoundaries(pos) : undefined;
       var x = 2;
@@ -1150,7 +1162,6 @@ class BookMenu extends MovieClip
          y += tf.getLineMetrics(i).height;
          i++;
       }
-      var side = this.bNote ? 0 : page - this.EditSpreadLeft();   // the engine draws slot k as EditSpreadLeft() - iEditShownFrom + k
       // ShowEditPage puts a page's top at the clip's top (the field's _y = 2 - that top), so y is the clip's y.
       var pt = {x:x + tf._x, y:y};
       this.EditClip.localToGlobal(pt);
@@ -1273,8 +1284,14 @@ class BookMenu extends MovieClip
       s._y = tf._y + top - 2;
    }
 
-   // From the plugin: "1" while the quill shows where the caret is, "0" when it's gone.  Unfocusing alone still draws the
-   // caret: a field that can't be typed in draws none, so the caret's place is kept here meanwhile.
+   // Whether there's a caret: none on a blank or title page (EditSetCaretOrNone).
+   function EditHasCaret()
+   {
+      return this.bHideCaret ? this.iCaretPos >= 0 : this.EditField.type == "input";
+   }
+
+   // From the plugin: "1" while the quill shows the caret, "0" when it's gone; the caret's place is kept here meanwhile
+   // (a field that can't be typed in draws no caret).
    function EditHideCaret(on)
    {
       var hide = on == "1";
@@ -1284,7 +1301,7 @@ class BookMenu extends MovieClip
       }
       if(hide)
       {
-         this.iCaretPos = this.EditCaret();
+         this.iCaretPos = this.EditHasCaret() ? this.EditCaret() : -1;
          this.bHideCaret = true;
          Selection.setFocus(null);
          this.EditField.type = "dynamic";
@@ -1293,7 +1310,7 @@ class BookMenu extends MovieClip
       else
       {
          this.bHideCaret = false;
-         this.EditSetCaret(this.iCaretPos);
+         this.EditSetCaretOrNone(this.iCaretPos);
       }
    }
 

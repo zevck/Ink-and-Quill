@@ -46,7 +46,11 @@ namespace InkAndQuill::Settings {
         // Debug.Logging: the log's level, at once.
         void ApplyLogLevel()
         {
-            if (auto log = spdlog::default_logger()) log->set_level(Get(kDebugLog) ? spdlog::level::debug : spdlog::level::info);
+            const auto level = Get(kDebugLog) ? spdlog::level::debug : spdlog::level::info;
+            if (auto log = spdlog::default_logger()) {
+                log->set_level(level);
+                log->flush_on(level);  // written at once: the lines before a crash reach the file
+            }
         }
     }
 

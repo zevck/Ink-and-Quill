@@ -41,9 +41,8 @@ namespace InkAndQuill::QuillCursor {
         RE::NiPointer<RE::NiAVObject> g_quill;
         float g_size = 0.f;  // the model's radius at scale 1
 
-        // The pose against the camera, so the quill looks the same on screen on any book or note: the nib's spot on the
-        // paper, from the caret's in stage units; how far the nib floats above it toward the camera; the quill's
-        // rotation in the camera's space and its scale in the world (docs/EDITOR.md#quill-cursor).
+        // The pose against the camera, the same on screen on any book or note: the nib's spot from the caret's (stage units),
+        // its height above it toward the camera, the rotation in the camera's space, the world scale (docs/EDITOR.md).
         struct View {
             float dx = 0.f, dy = 0.f, hover = 0.f, scale = 1.f;
             RE::NiMatrix3 rotate;
@@ -57,8 +56,12 @@ namespace InkAndQuill::QuillCursor {
                                                 RE::NiPoint3{ -0.8754f, -0.0336f, 0.4822f } } };
 
         int g_still = 0;           // frames the page hasn't moved (the quill shows once it's in place)
+        int g_waited = 0;          // frames since the quill was made, until it's placed
+        constexpr int kStillFrames = 10;     // the page still this long, the caret's point on the paper: the quill shows
+        constexpr int kStillAnyway = 30;     // ... or this long, without the paper
+        constexpr int kPlaceTimeout = 120;   // not shown by then: the real caret comes back (logged)
         RE::NiPoint3 g_lastPage;   // the page's world position last frame
-        bool g_onSheet = false;    // the last OnPage point came from the paper, not the flat quad
+        RE::NiPoint3 g_lastAnchor; // the caret's point last frame: it moves with a turning sheet, the page doesn't
         bool g_caretOnSheet = false;  // the caret's point did
         bool g_placed = false;     // the quill has been shown: it stays hidden until it's in place
         bool g_caretHidden = false;  // book.swf draws no caret: the quill is it (from the start, not once it's placed)
@@ -152,20 +155,12 @@ namespace InkAndQuill::QuillCursor {
                 const auto* raw = renderer ? renderer->rawVertexData : nullptr;
                 if (!raw) return RE::BSVisit::BSVisitControl::kContinue;
                 const auto desc = geometry->GetGeometryRuntimeData().vertexDesc;
-                const auto stride = static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(desc) & 0xF) * 4;
+                const auto stride = QuillPaper::Stride(desc);
                 const bool full = desc.HasFlag(RE::BSGraphics::Vertex::VF_UV) ? desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_TEXCOORD0) >= 16
                                                                              : desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC);
                 const auto toModel = toQuill * geometry->world;
                 for (std::uint32_t i = 0; i < shape->GetTrishapeRuntimeData().vertexCount; ++i) {
-                    RE::NiPoint3 p;
-                    if (full) {
-                        std::memcpy(&p, raw + i * stride, sizeof(p));
-                    } else {
-                        std::uint16_t h[3];
-                        std::memcpy(h, raw + i * stride, sizeof(h));
-                        p = { QuillPaper::HalfToFloat(h[0]), QuillPaper::HalfToFloat(h[1]), QuillPaper::HalfToFloat(h[2]) };
-                    }
-                    p = toModel * p;
+                    const auto p = toModel * QuillPaper::Position(raw + i * stride, full);
                     if (!tip || p.z < tip->z) tip = p;
                 }
                 return RE::BSVisit::BSVisitControl::kContinue;
@@ -175,9 +170,8 @@ namespace InkAndQuill::QuillCursor {
                             g_nib.z);
         }
 
-        // The book menu's scene ignores alpha testing: an alpha-tested shape's see-through texels draw solid (HFs' feather,
-        // a flat card, covered the page with its reflection).  Such a shape is blended instead and writes no depth, on
-        // copies of its properties so the world's quills keep theirs.
+        // The book menu's scene ignores alpha testing (HFs' feather card drew solid): such shapes are blended and write no
+        // depth instead, on copies of their properties so the world's quills keep theirs.
         void BlendCutouts(RE::NiAVObject* quill)
         {
             RE::BSVisit::TraverseScenegraphGeometries(quill, [](RE::BSGeometry* geometry) {
@@ -187,15 +181,15 @@ namespace InkAndQuill::QuillCursor {
                                  alpha != nullptr, alpha && alpha->GetAlphaBlending(), alpha && alpha->GetAlphaTesting(),
                                  alpha ? alpha->alphaThreshold : 0);
                 if (!alpha || !alpha->GetAlphaTesting() || alpha->GetAlphaBlending()) return RE::BSVisit::BSVisitControl::kContinue;
-                auto* alphaCopy = alpha->Clone();
-                auto* blend = alphaCopy ? skyrim_cast<RE::NiAlphaProperty*>(alphaCopy) : nullptr;
+                const RE::NiPointer<RE::NiObject> alphaCopy{ alpha->Clone() };
+                auto* blend = alphaCopy ? skyrim_cast<RE::NiAlphaProperty*>(alphaCopy.get()) : nullptr;
                 if (!blend) return RE::BSVisit::BSVisitControl::kContinue;
                 blend->SetAlphaBlending(true);
                 blend->SetSrcBlendMode(RE::NiAlphaProperty::AlphaFunction::kSrcAlpha);
                 blend->SetDestBlendMode(RE::NiAlphaProperty::AlphaFunction::kInvSrcAlpha);
                 data.alphaProperty.reset(blend);
-                if (auto* shaderCopy = data.shaderProperty ? data.shaderProperty->Clone() : nullptr) {
-                    if (auto* shader = skyrim_cast<RE::BSShaderProperty*>(shaderCopy)) {
+                if (const RE::NiPointer<RE::NiObject> shaderCopy{ data.shaderProperty ? data.shaderProperty->Clone() : nullptr }) {
+                    if (auto* shader = skyrim_cast<RE::BSShaderProperty*>(shaderCopy.get())) {
                         shader->SetFlags(RE::BSShaderProperty::EShaderPropertyFlag8::kZBufferWrite, false);
                         data.shaderProperty.reset(shader);
                     }
@@ -231,8 +225,7 @@ namespace InkAndQuill::QuillCursor {
                 SKSE::log::warn("[Quill] PageText has no UVs");
                 return quad;
             }
-            // The descriptor's low nibble: the stride in 4 bytes (GetSize counts a position as 16 even when it's halves).
-            const auto stride = static_cast<std::uint32_t>(std::bit_cast<std::uint64_t>(desc) & 0xF) * 4;
+            const auto stride = QuillPaper::Stride(desc);  // not GetSize: it counts a position as 16 even when it's halves
             const auto uvAt = desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_TEXCOORD0);
             // The UVs follow the position: 16 bytes after it are floats (x, y, z, w), 8 halves.
             const bool full = uvAt >= 16;
@@ -242,14 +235,7 @@ namespace InkAndQuill::QuillCursor {
             quad.u1 = quad.v1 = -FLT_MAX;
             for (std::uint32_t i = 0; i < count; ++i) {
                 const auto* vertex = raw + i * stride;
-                RE::NiPoint3 p;
-                if (full) {
-                    std::memcpy(&p, vertex, sizeof(p));
-                } else {
-                    std::uint16_t h[3];
-                    std::memcpy(h, vertex, sizeof(h));
-                    p = { QuillPaper::HalfToFloat(h[0]), QuillPaper::HalfToFloat(h[1]), QuillPaper::HalfToFloat(h[2]) };
-                }
+                const auto p = QuillPaper::Position(vertex, full);
                 std::uint16_t uv[2];
                 std::memcpy(uv, vertex + uvAt, sizeof(uv));
                 const float u = QuillPaper::HalfToFloat(uv[0]), v = QuillPaper::HalfToFloat(uv[1]);
@@ -266,7 +252,7 @@ namespace InkAndQuill::QuillCursor {
             return quad;
         }
 
-        // The caret, from book.swf: "side,page,x,y,gx,gy" (EditCaretPoint).
+        // The caret, from book.swf: "side,page,x,y,gx,gy,slot", or "" with none on a shown page (EditCaretPoint).
         std::string CaretPoint()
         {
             RE::GFxValue point;
@@ -280,22 +266,24 @@ namespace InkAndQuill::QuillCursor {
             return menu ? menu->GetRuntimeData().pageTextGeo.get() : nullptr;
         }
 
-        // A point on the stage, on the page in its space.  The engine sets the movie's viewport to PageText's UV range
-        // (BookMenu setup, AE 0x1408f1ed0) and draws the texture on the "Base Page" sheets: the point is where the
-        // caret's slot's sheet shows that UV, as it's bent now.  Without one, on PageText's flat quad.
-        std::optional<RE::NiPoint3> OnPage(int slot, float gx, float gy)
+        // A stage point on the page, in its space: where the slot's sheet shows its UV, as it's bent now, else on PageText's
+        // flat quad (docs/EDITOR.md#quill-cursor).
+        struct PagePoint {
+            RE::NiPoint3 point;
+            bool onSheet = false;  // from the paper, not the flat quad
+        };
+
+        std::optional<PagePoint> OnPage(int slot, float gx, float gy)
         {
             const float width = g_visible.right - g_visible.left, height = g_visible.bottom - g_visible.top;
             if (!g_quad.valid || width <= 0.f || height <= 0.f) return std::nullopt;
             const auto& q = g_quad;
             const float u = q.u0 + (gx - g_visible.left) / width * (q.u1 - q.u0), v = q.v0 + (gy - g_visible.top) / height * (q.v1 - q.v0);
-            g_onSheet = false;
             if (const auto onSheet = QuillPaper::At(slot, u, v); onSheet && Page()) {
                 // On the page, or not used: a stray point once put the quill thousands of units off and hid the book.
                 const auto point = Page()->world.Invert() * *onSheet;
                 if (std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z) && std::abs(point.z) < 5.f) {
-                    g_onSheet = true;
-                    return point;
+                    return PagePoint{ point, true };
                 }
                 static bool said = false;
                 if (!std::exchange(said, true)) {
@@ -306,7 +294,7 @@ namespace InkAndQuill::QuillCursor {
             const float s = std::clamp(1.f - (gx - g_visible.left) / width, 0.f, 1.f);
             const float t = std::clamp(1.f - (gy - g_visible.top) / height, 0.f, 1.f);
             const auto top = q.p00 * (1.f - s) + q.p10 * s, bottom = q.p01 * (1.f - s) + q.p11 * s;
-            return top * (1.f - t) + bottom * t;
+            return PagePoint{ top * (1.f - t) + bottom * t, false };
         }
 
         // Where the caret is on the page.
@@ -320,8 +308,10 @@ namespace InkAndQuill::QuillCursor {
             if (std::sscanf(g_caret.c_str(), "%f,%f,%f,%f,%f,%f,%f", &side, &number, &x, &y, &gx, &gy, &slot) >= 6) {
                 g_stagePoint = RE::NiPoint2{ gx, gy };
                 g_slot = static_cast<int>(slot);
-                point = OnPage(g_slot, gx, gy);
-                g_caretOnSheet = g_onSheet;
+                if (const auto at = OnPage(g_slot, gx, gy)) {
+                    point = at->point;
+                    g_caretOnSheet = at->onSheet;
+                }
             }
             g_anchor = point ? *point : page->world.Invert() * page->worldBound.center;
         }
@@ -341,9 +331,8 @@ namespace InkAndQuill::QuillCursor {
             auto* page = Page();
             auto* camera = Camera();
             if (!page || !camera) return std::nullopt;
-            std::optional<RE::NiPoint3> spot;
-            if (g_stagePoint) spot = OnPage(g_slot, g_stagePoint->x + view.dx, g_stagePoint->y + view.dy);
-            const auto spotWorld = page->world * (spot ? *spot : g_anchor);
+            const auto spot = g_stagePoint ? OnPage(g_slot, g_stagePoint->x + view.dx, g_stagePoint->y + view.dy) : std::nullopt;
+            const auto spotWorld = page->world * (spot ? spot->point : g_anchor);
             auto up = camera->world.translate - spotWorld;
             const float length = up.Length();
             if (!Perspective(camera) || length < 1e-3f) up = camera->world.rotate * RE::NiPoint3{ -1.f, 0.f, 0.f };  // its look is +x
@@ -355,14 +344,30 @@ namespace InkAndQuill::QuillCursor {
             return world;
         }
 
+        // The quill isn't placed in time: the real caret back, and why, once.
+        void RestoreCaret()
+        {
+            if (std::exchange(g_caretHidden, false)) Book::Call("EditHideCaret", nullptr, "0");
+            const char* why = !Camera() ? "no 3D scene camera" : g_still < kStillAnyway ? "the book kept moving" : "its place couldn't be worked out";
+            SKSE::log::info("[Quill] Not shown after {} frames ({}): the real caret instead until it is", kPlaceTimeout, why);
+        }
+
         void Apply()
         {
             auto* page = Page();
             if (!g_parent || !g_quill || !page) return;
             FindAnchor(page);
-            const bool still = (page->world.translate - g_lastPage).Length() < 1e-3f;
+            const bool still = (page->world.translate - g_lastPage).Length() < 1e-3f && (g_anchor - g_lastAnchor).Length() < 1e-3f;
             g_lastPage = page->world.translate;
+            g_lastAnchor = g_anchor;
             g_still = still ? g_still + 1 : 0;
+            // No caret, or one on a page that isn't shown (paging to a title page): no quill either, and once the caret is
+            // back it waits again for the page to stop moving (it turns).  Waiting there doesn't count toward the timeout.
+            if (!g_stagePoint) {
+                if (std::exchange(g_placed, false)) g_quill->GetFlags().set(RE::NiAVObject::Flag::kHidden);
+                return;
+            }
+            if (!g_placed && ++g_waited == kPlaceTimeout) RestoreCaret();
             const auto world = g_view ? ViewWorld(*g_view) : std::nullopt;
             if (!world) return;
             const auto& t = world->translate;
@@ -372,12 +377,11 @@ namespace InkAndQuill::QuillCursor {
             g_quill->Update(update);
             g_quill->world = g_parent->world * g_quill->local;
             g_quill->UpdateDownwardPass(update, 0);
-            // Shown once the book has stopped moving with the caret's point on the paper (or a while later, without it):
-            // until then it jumps (the book opening, the caret's point not yet found).
-            if (!g_placed && g_stagePoint && ((g_still >= 10 && g_caretOnSheet) || g_still >= 30)) {
-                g_placed = true;
-                g_quill->GetFlags().reset(RE::NiAVObject::Flag::kHidden);
-            }
+            // Shown once the book has stopped moving (until then it jumps: the book opening, the caret's point not yet found).
+            if (!g_placed && ((g_still >= kStillFrames && g_caretOnSheet) || g_still >= kStillAnyway)) g_placed = true;
+            if (!g_placed) return;
+            g_quill->GetFlags().reset(RE::NiAVObject::Flag::kHidden);
+            if (!g_caretHidden && !Settings::QuillAdjust()) g_caretHidden = Book::Call("EditHideCaret", nullptr, "1");
         }
 
         void LogPose(const std::string& what, bool info = true)
@@ -459,6 +463,7 @@ namespace InkAndQuill::QuillCursor {
         g_parent.reset(book);
         g_quill.reset(quill);
         g_placed = false;
+        g_waited = 0;
         // The quill is the caret: none from the start, so it doesn't blink before the quill is in place.  Adjust mode
         // keeps the real one, to line the nib up against.
         if (!Settings::QuillAdjust()) g_caretHidden = Book::Call("EditHideCaret", nullptr, "1");
