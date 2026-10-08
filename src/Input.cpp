@@ -19,6 +19,7 @@
 
 #include "Input.h"
 
+#include "Bookmarks.h"
 #include "Editor.h"
 #include "Keys.h"
 #include "Settings.h"
@@ -36,6 +37,23 @@ namespace InkAndQuill::Input {
 
         bool IsClientKey(std::uint32_t code) { return code < g_clientKeys.size() && g_clientKeys[code]; }
 
+        // Ink & Quill's keys while reading: the edit key, the bookmark list key (not a client's own key: that's the client's).
+        bool IsReadingKey(std::uint32_t code)
+        {
+            if (code == Settings::EditKey()) return true;
+            return !IsClientKey(code) && code == Settings::ContentsKey();
+        }
+
+        // Left the game's while the bookmark list is open: its page turn turns the list (BookMenu.ContentsTurn).
+        bool IsListTurnKey(std::uint32_t code) { return code == kLeft || code == kRight; }
+
+        // The console over the book: its keys are typed there.
+        bool ConsoleOpen()
+        {
+            auto* ui = RE::UI::GetSingleton();
+            return ui && ui->IsMenuOpen(RE::Console::MENU_NAME);
+        }
+
         // Reads the keyboard events for the editor, then takes them out of the list, so nothing after it sees them:
         // the book menu, other mods' sinks and dispatch hooks (docs/EDITOR.md#input).  Input thread: work is queued.
         void FilterInput(RE::InputEvent** events)
@@ -43,17 +61,28 @@ namespace InkAndQuill::Input {
             if (!events || !*events || Editor::IsPrompting()) return;  // a prompt's keys are its own
             const bool writing = Editor::IsWriting();
             if (!writing && !Editor::IsBookOpen()) return;
-            bool editKeyTaken = false;
+            if (!writing && ConsoleOpen()) return;
+            const bool listOpen = !writing && Bookmarks::IsListOpen();  // once: the routing and the dropping agree
+            bool readingKeyTaken = false;
             for (auto* event = *events; event; event = event->next) {
                 auto* button = event->AsButtonEvent();
                 if (!button || button->GetDevice() != RE::INPUT_DEVICE::kKeyboard) continue;
                 const auto code = button->GetIDCode();
                 if (!writing) {
-                    // The edit key while a book is open: write in it, if a client owns it.
-                    if (code == Settings::EditKey() && button->IsDown()) {
-                        editKeyTaken = true;
-                        Editor::OnEditKey(writing);
+                    // The bookmark list open: every key is its (Esc closes the list, not the book), but Left and Right:
+                    // the game's page turn turns the list, as a click does.
+                    if (listOpen) {
+                        if (IsListTurnKey(code)) continue;
+                        readingKeyTaken = true;
+                        if (Keys::ShouldRepeat(button, code)) Bookmarks::OnKeyInList(code);
+                        continue;
                     }
+                    // While a book is open: the edit key writes in it (if a client owns it), the list key opens the list.
+                    if (!IsReadingKey(code)) continue;
+                    readingKeyTaken = true;
+                    if (!button->IsDown()) continue;
+                    if (code == Settings::EditKey()) Editor::OnEditKey(writing);
+                    else Bookmarks::OnListKey();
                     continue;
                 }
                 if (code == Settings::EditKey()) {
@@ -63,8 +92,8 @@ namespace InkAndQuill::Input {
                 if (IsClientKey(code) || IsModifier(code)) continue;
                 if (Keys::ShouldRepeat(button, code)) Editor::OnKey(code);
             }
-            if (!writing && !editKeyTaken) return;
-            // Unlink what nobody else may see: while writing every keyboard event but clients' keys, else the edit key.
+            if (!writing && !readingKeyTaken) return;
+            // Unlink what nobody else may see: while writing every keyboard event but clients' keys, else our reading keys.
             RE::InputEvent* kept = nullptr;
             RE::InputEvent** tail = &kept;
             for (auto* event = *events; event;) {
@@ -72,7 +101,8 @@ namespace InkAndQuill::Input {
                 auto* button = event->AsButtonEvent();
                 const bool keyboard = button && button->GetDevice() == RE::INPUT_DEVICE::kKeyboard;
                 const auto code = keyboard ? button->GetIDCode() : 0;
-                const bool drop = keyboard && (writing ? code == Settings::EditKey() || !IsClientKey(code) : code == Settings::EditKey());
+                const bool drop = keyboard && (writing ? code == Settings::EditKey() || !IsClientKey(code)
+                                                       : listOpen ? !IsListTurnKey(code) : IsReadingKey(code));
                 if (!drop) {
                     event->next = nullptr;
                     *tail = event;

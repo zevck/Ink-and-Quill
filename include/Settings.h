@@ -33,15 +33,17 @@ namespace InkAndQuill::Settings {
 
     // A DirectX scan code, not a key that types: while writing it can't also type.
     inline constexpr Setting kEditKey{ "Keys", "Edit", 61, 1, 255 };      // F3: start writing; save and read again
+    inline constexpr Setting kContentsKey{ "Keys", "Contents", 0xC7, 1, 255 };  // Home, reading: the bookmark list
     inline constexpr Setting kInkwellUses{ "Writing", "InkwellUses", 10, 0, 100 };  // saves a full inkwell lasts; 0: never runs dry
     inline constexpr Setting kBloodCost{ "Writing", "BloodCost", 10, 1, 100 };      // % of maximum health per save
     inline constexpr Setting kBlood{ "Writing", "Blood", 1, 0, 1 };                 // offered when there's no ink
     inline constexpr Setting kRequireQuillAndInk{ "Writing", "RequireQuillAndInk", 1, 0, 1 };  // 0: writing is free
     inline constexpr Setting kQuillCursor{ "Writing", "QuillCursor", 1, 0, 1 };  // the game's quill at the caret, in place of it
+    inline constexpr Setting kWritingSound{ "Writing", "Sound", 1, 0, 1 };      // a quill scratch for each typed key
     inline constexpr Setting kQuillAdjust{ "Debug", "QuillAdjust", 0, 0, 1 };    // the numpad poses the quill (QuillCursor.h)
     inline constexpr Setting kDebugLog{ "Debug", "Logging", 0, 0, 1 };           // the log at debug level, not info
 
-    inline constexpr const Setting* kAll[] = { &kEditKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kQuillCursor, &kQuillAdjust,
+    inline constexpr const Setting* kAll[] = { &kEditKey, &kContentsKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kQuillCursor, &kWritingSound, &kQuillAdjust,
                                                &kDebugLog };
 
     void Load();
@@ -59,7 +61,9 @@ namespace InkAndQuill::Settings {
     void Set(const Setting& setting, int value);
 
     inline std::uint32_t EditKey() { return static_cast<std::uint32_t>(Get(kEditKey)); }
+    inline std::uint32_t ContentsKey() { return static_cast<std::uint32_t>(Get(kContentsKey)); }
     inline bool QuillCursor() { return Get(kQuillCursor) != 0; }
     inline bool QuillAdjust() { return Get(kQuillAdjust) != 0; }
+    inline bool WritingSound() { return Get(kWritingSound) != 0; }
 
 }

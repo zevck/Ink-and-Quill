@@ -264,6 +264,12 @@ namespace InkAndQuill::WritingTools {
 
     bool HasInk() { return CarriesAny(RE::PlayerCharacter::GetSingleton(), IsInkwell); }
 
+    namespace {
+        RE::FormID g_lastInkwell = 0;
+    }
+
+    RE::FormID LastInkwell() { return g_lastInkwell; }
+
     Ink UseInk()
     {
         auto* player = RE::PlayerCharacter::GetSingleton();
@@ -271,6 +277,7 @@ namespace InkAndQuill::WritingTools {
         if (!inkwell.entry) return Ink::None;
         if (MaxUses() == 0) return Ink::Used;  // inkwells never run dry: none is used or renamed
         auto* object = inkwell.entry->object;
+        g_lastInkwell = object ? object->GetFormID() : 0;
         const int left = inkwell.uses - 1;
         if (left == 0) {
             player->RemoveItem(object, 1, RE::ITEM_REMOVE_REASON::kRemove, inkwell.list, nullptr);

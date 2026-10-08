@@ -9,15 +9,19 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 | Setting | Default | Range | What |
 |---|---|---|---|
 | `Keys.Edit` | 61 (F3) | 1–255 | With a book open: start writing, if a client owns the book or it's a blank. While writing: save and read again |
+| `Keys.Contents` | 199 (Home) | 1–255 | While reading: opens the bookmark list on the open pages; pressed again, closes it ([EDITOR.md](EDITOR.md#bookmarks)) |
 | `Writing.RequireQuillAndInk` | 1 | 0–1 | 0: writing needs no quill and no ink, offers no blood and costs nothing (`Editor`'s `g_free`, decided when writing starts) |
 | `Writing.InkwellUses` | 10 | 0–100 | Saves a full inkwell lasts; 0: inkwells never run dry (none is used or renamed; the MCM shows "Infinite") |
 | `Writing.Blood` | 1 | 0–1 | With a quill but no ink, offer to write in blood. 0: the `NeedsInk` notice instead (a HUD notice on a blank) |
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
 | `Writing.QuillCursor` | 1 | 0–1 | While writing, the game's quill sits at the caret, in place of the blinking caret. 0: the plain caret ([EDITOR.md](EDITOR.md#quill-cursor)) |
+| `Writing.Sound` | 1 | 0–1 | While writing, a quill scratch for each typed key ([EDITOR.md](EDITOR.md#the-writing-sound)) |
 | `Debug.QuillAdjust` | 0 | 0–1 | MCM "Quill adjust mode": shows the quill whatever `Writing.QuillCursor` says, keeps the real caret beside it, and lets the numpad pose it ([EDITOR.md](EDITOR.md#quill-cursor)) |
 | `Debug.Logging` | 0 | 0–1 | MCM "Debug logging": `InkAndQuill.log` at debug level, written to disk line by line: adds the quill's details each time a book opens (the page's vertices and sheets, the camera) and, in adjust mode, where the caret, nib and page corners land on screen. Takes effect as soon as it's changed |
 
-The key is a DirectX scan code, not one that types (while writing it couldn't also type). The MCM refuses, with a message, a code that isn't a keyboard key (SkyUI also offers mouse and gamepad buttons, 256 and up) or a key that types or edits (`GetKeyProblem`, i.e. `Keys::Check`, also used for clients' keys: Escape, Backspace, Enter, Delete, the arrows, Home, End, the modifiers, and anything that gives a character with the player's layout). It doesn't check conflicts: it only acts while a book is open, where game controls don't apply. Clients' own keys (Physical Diaries' new entry and tear-out) are theirs, in their own settings.
+**The edit key** is a DirectX scan code, not one that types (while writing it couldn't also type). The MCM refuses, with a message, a code that isn't a keyboard key (SkyUI also offers mouse and gamepad buttons, 256 and up) or a key that types or edits (`GetKeyProblem`, i.e. `Keys::Check`, also used for clients' keys: Escape, Backspace, Enter, Delete, the arrows, Home, End, the modifiers, and anything that gives a character with the player's layout). It doesn't check conflicts: it only acts while a book is open, where game controls don't apply. Clients' own keys (Physical Diaries' new entry and tear-out) are theirs, in their own settings.
+
+**The bookmark list key** only acts while reading, where nothing types, so the MCM accepts any keyboard key for it (Home by default) and refuses only mouse and gamepad buttons (`$IQ_ReadingKeyNotKeyboard`). A client's own key (`RegisterKeys`) wins: bound to the same key, the list doesn't open.
 
 **Changing `InkwellUses`:** used inkwells are renamed against the new maximum, keeping their uses left but never above it ("Inkwell (7/10)": with 20, "(7/20)"; with 5, "(5/5)"), when the inventory, a container, a shop or the gift menu opens: the player's own, and the opened container's (not a shop's stock, which is in the merchant's chest). Any other is renamed on its next use, which reads its own count back (`UsesLeft`, any `(n/m)`) the same way. With 0 (never run dry) names are left alone.
 
@@ -37,7 +41,7 @@ Inkwells = 0x000801~ScribesInk.esl
 
 ## The MCM
 
-One page. Left: the edit key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost, quill at the cursor). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off; the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
+One page. Left: the edit key and the bookmark list key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost, quill at the cursor, writing sound). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off; the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
 
 The natives (`InkAndQuill_MCM`, global): `GetSetting`, `SetSetting`, `GetSettingDefault`, `GetSettingMin`, `GetSettingMax` by `"Section.Key"` (any case; an unknown name reads 0, logged), `GetKeyProblem`, and `GetClientCount`, `GetClientName`.
 

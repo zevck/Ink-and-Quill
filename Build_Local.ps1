@@ -57,6 +57,7 @@ $mirroredFolders = @(
     "Scripts",
     "Source\Scripts",
     "Interface\Translations",
+    "Sound\FX\InkAndQuill",
     "Seq"
 )
 

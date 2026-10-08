@@ -38,6 +38,9 @@ namespace InkAndQuill::WritingTools {
     // left.  Ink::RanDry: that was its last use, and it's gone.  Ink::None: no inkwell.
     Ink UseInk();
 
+    // The inkwell UseInk last took ink from (renamed or gone), 0 before any: the inventory is told when the book closes.
+    RE::FormID LastInkwell();
+
     // Writing in blood wouldn't leave the player below 1 health.
     bool CanBleed();
 

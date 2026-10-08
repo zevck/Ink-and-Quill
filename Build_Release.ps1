@@ -2,7 +2,7 @@
 #
 #   1. Refuses a working tree with uncommitted changes (a release is a commit), unless -allowDirty.
 #   2. Builds everything with .\Build_Local.ps1 -noDeploy (plugin, Papyrus, SWFs, ESP), unless -skipBuild.
-#   3. Stages build\release\stage: 00 Core (DLL, ESP, Scripts, Source\Scripts, Interface\Translations),
+#   3. Stages build\release\stage: 00 Core (DLL, ESP, Scripts, Source\Scripts, Interface\Translations, Sound),
 #      01 Vanilla and 02 Convenient Reading (one book.swf each), fomod\ (its version from CMakeLists.txt).
 #   4. Checks what it staged: both SWFs uncompressed with the writing marker, every translation with
 #      English's keys, ModuleConfig.xml valid with every folder it installs present.
@@ -72,7 +72,8 @@ $folders = [ordered]@{
     "00 Core\Scripts"                = "Scripts"
     "00 Core\Source\Scripts"         = "Source\Scripts"
     "00 Core\Interface\Translations" = "Interface\Translations"
-    "fomod"                          = "fomod"
+    "00 Core\Sound\FX\InkAndQuill"   = "Sound\FX\InkAndQuill"
+    "fomod"                         = "fomod"
 }
 foreach ($to in $files.Keys) {
     if (-not (Test-Path -LiteralPath $files[$to])) { throw "Missing $($files[$to]): build first" }

@@ -12,11 +12,13 @@ int    Function GetClientCount()                       global native
 string Function GetClientName(int index)               global native
 
 int _editKeyOid
+int _contentsOid
 int _requireOid
 int _usesOid
 int _bloodOid
 int _bloodCostOid
 int _quillOid
+int _soundOid
 int _adjustOid
 int _debugLogOid
 
@@ -43,6 +45,7 @@ event OnPageReset(string page)
     SetCursorFillMode(TOP_TO_BOTTOM)
     AddHeaderOption("$IQ_HeaderKeys")
     _editKeyOid = AddKeyMapOption("$IQ_EditKey", GetSetting("Keys.Edit"))
+    _contentsOid = AddKeyMapOption("$IQ_ContentsKey", GetSetting("Keys.Contents"))
     AddEmptyOption()
     AddHeaderOption("$IQ_HeaderWriting")
     _requireOid = AddToggleOption("$IQ_Materials", GetSetting("Writing.RequireQuillAndInk") != 0)
@@ -50,6 +53,7 @@ event OnPageReset(string page)
     _bloodOid = AddToggleOption("$IQ_Blood", GetSetting("Writing.Blood") != 0, WritingFlags())
     _bloodCostOid = AddSliderOption("$IQ_BloodCost", GetSetting("Writing.BloodCost"), "{0}%", BloodCostFlags())
     _quillOid = AddToggleOption("$IQ_QuillCursor", GetSetting("Writing.QuillCursor") != 0)
+    _soundOid = AddToggleOption("$IQ_WritingSound", GetSetting("Writing.Sound") != 0)
 
     SetCursorPosition(1)
     AddHeaderOption("$IQ_HeaderDebug")
@@ -80,12 +84,16 @@ string function SettingOf(int oid)
         return "Writing.BloodCost"
     elseif oid == _quillOid
         return "Writing.QuillCursor"
+    elseif oid == _soundOid
+        return "Writing.Sound"
     elseif oid == _adjustOid
         return "Debug.QuillAdjust"
     elseif oid == _debugLogOid
         return "Debug.Logging"
     elseif oid == _editKeyOid
         return "Keys.Edit"
+    elseif oid == _contentsOid
+        return "Keys.Contents"
     endif
     return ""
 endfunction
@@ -115,7 +123,7 @@ function UpdateFlags()
 endfunction
 
 event OnOptionSelect(int oid)
-    if oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
+    if oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _soundOid || oid == _adjustOid || oid == _debugLogOid
         string name = SettingOf(oid)
         bool enabled = GetSetting(name) == 0
         SetSetting(name, enabled as int)
@@ -145,6 +153,16 @@ endevent
 ; The key only acts while a book is open, where game controls don't apply: a conflict with one doesn't matter.  It
 ; must be a keyboard key that neither types nor edits (it would save instead).
 event OnOptionKeyMapChange(int oid, int keyCode, string conflictControl, string conflictName)
+    if oid == _contentsOid
+        ; Only read while reading, where no key types: any keyboard key will do.
+        if GetKeyProblem(keyCode) == 1
+            ShowMessage("$IQ_ReadingKeyNotKeyboard", false, "$IQ_Ok")
+        else
+            SetSetting(SettingOf(oid), keyCode)
+            SetKeyMapOptionValue(oid, GetSetting(SettingOf(oid)))
+        endif
+        return
+    endif
     if oid != _editKeyOid
         return
     endif
@@ -166,9 +184,9 @@ event OnOptionDefault(int oid)
     endif
     SetSetting(name, GetSettingDefault(name))
     int value = GetSetting(name)
-    if oid == _editKeyOid
+    if oid == _editKeyOid || oid == _contentsOid
         SetKeyMapOptionValue(oid, value)
-    elseif oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
+    elseif oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _soundOid || oid == _adjustOid || oid == _debugLogOid
         SetToggleOptionValue(oid, value != 0)
         UpdateFlags()
     else
@@ -179,6 +197,8 @@ endevent
 event OnOptionHighlight(int oid)
     if oid == _editKeyOid
         SetInfoText("$IQ_TipEditKey")
+    elseif oid == _contentsOid
+        SetInfoText("$IQ_TipContentsKey")
     elseif oid == _requireOid
         SetInfoText("$IQ_TipMaterials")
     elseif oid == _usesOid
@@ -189,6 +209,8 @@ event OnOptionHighlight(int oid)
         SetInfoText("$IQ_TipBloodCost")
     elseif oid == _quillOid
         SetInfoText("$IQ_TipQuillCursor")
+    elseif oid == _soundOid
+        SetInfoText("$IQ_TipWritingSound")
     elseif oid == _adjustOid
         SetInfoText("$IQ_TipQuillAdjust")
     elseif oid == _debugLogOid

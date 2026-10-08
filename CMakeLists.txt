@@ -29,6 +29,7 @@ include(lib/commonlibsse-ng/cmake/CommonLibSSE.cmake)
 set(sources
     src/main.cpp
     src/API.cpp
+    src/Bookmarks.cpp
     src/Clipboard.cpp
     src/Clients.cpp
     src/Editor.cpp
@@ -41,6 +42,7 @@ set(sources
     src/Strings.cpp
     src/Suggestions.cpp
     src/WritingMode.cpp
+    src/WritingSound.cpp
     src/WritingTools.cpp
 )
 

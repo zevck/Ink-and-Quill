@@ -30,7 +30,7 @@ namespace InkAndQuill::WritingMode {
         // BookMenu.as WRITING_INTERFACE.  A SWF only adds calls, so any version from kMinInterface up
         // will do; raise it when the plugin needs a newer call.
         constexpr std::string_view kMarker = "BOOKMENU_WRITING_INTERFACE=";
-        constexpr int kMinInterface = 4;  // 2: blood (EditSetBlood, marked bodies); 3: EditCanErase; 4: SetEditMarked
+        constexpr int kMinInterface = 5;  // 2: blood (EditSetBlood, marked bodies); 3: EditCanErase; 4: SetEditMarked; 5: bookmarks
 
         bool g_on = false;
 

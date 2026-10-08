@@ -20,6 +20,7 @@
 #include "Editor.h"
 
 #include "BookMovie.h"
+#include "Bookmarks.h"
 #include "Clipboard.h"
 #include "Input.h"
 #include "Keys.h"
@@ -27,7 +28,9 @@
 #include "Settings.h"
 #include "Strings.h"
 #include "Suggestions.h"
+#include "Tasks.h"
 #include "WritingMode.h"
+#include "WritingSound.h"
 #include "WritingTools.h"
 
 #include <Windows.h>
@@ -40,18 +43,7 @@ namespace InkAndQuill::Editor {
         std::atomic<bool> g_bookOpen{ false };  // the book menu is open (MenuSink), for the input thread
 
         // A UI task that can't throw past SKSE's queue (CLAUDE.md: every task catches).
-        void QueueUI(std::function<void()> work)
-        {
-            SKSE::GetTaskInterface()->AddUITask([work = std::move(work)]() {
-                try {
-                    work();
-                } catch (const std::exception& e) {
-                    SKSE::log::error("[Editor] A UI task failed: {}", e.what());
-                } catch (...) {
-                    SKSE::log::error("[Editor] A UI task failed");
-                }
-            });
-        }
+        void QueueUI(std::function<void()> work) { Tasks::QueueUI(std::move(work), "Editor"); }
 
         // ---- The session (the UI's thread: the input sink queues its work there) ----
 
@@ -75,8 +67,9 @@ namespace InkAndQuill::Editor {
         RE::FormID g_blankOnOpen = 0;   // a blank read from the inventory: open it once its text is in
         RE::FormID g_openingBlank = 0;  // the blank whose onOpen is running: the session it begins is for it
         RE::FormID g_sessionBlank = 0;  // the blank the session writes in, until a save replaces it
-        // Blanks that became books in the open menu (blank, book): the inventory shows them on its close.
-        std::vector<std::pair<RE::FormID, RE::FormID>> g_swapped;
+        // Items the open book menu changed: a blank and the book it became, the book saved in (a client may rename it),
+        // the inkwell used (renamed, or gone).  The inventory is told on the menu's close.
+        std::set<RE::FormID> g_touched;
 
         // The session is over: nothing of it is kept, and the client hears it once (onEnd), last.
         std::uint64_t g_sessionSerial = 0;  // bumped whenever a session ends: a client prompt answers only its own
@@ -92,7 +85,7 @@ namespace InkAndQuill::Editor {
             if (onEnd) onEnd();
         }
 
-        void Notify(const std::string& text) { RE::SendHUDMessage::ShowHUDMessage(text.c_str()); }
+        void Notify(const std::string& text) { Tasks::Notify(text); }
 
         RE::GFxMovieView* BookMovie() { return Book::Movie(); }
         void Invoke(const char* function, const char* argument = nullptr) { Book::Call(function, nullptr, argument); }
@@ -237,7 +230,8 @@ namespace InkAndQuill::Editor {
             auto* blank = RE::TESForm::LookupByID<RE::TESBoundObject>(blankId);
             if (player && blank && CountCarried(blank) > 0) player->RemoveItem(blank, 1, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
             SetBookMenuBook(book);
-            g_swapped.emplace_back(blankId, bookId);
+            g_touched.insert(blankId);
+            g_touched.insert(bookId);
             SKSE::log::info("[Editor] Blank {:08X} became {:08X}", blankId, bookId);
             return true;
         }
@@ -306,6 +300,8 @@ namespace InkAndQuill::Editor {
             }
             for (std::size_t i = 0; i < bodies->size(); ++i) g_edit[i] = { (*bodies)[i] };
             if (g_sessionBlank != 0) ReplaceBlank(saved.book);
+            if (auto* book = RE::BookMenu::GetTargetForm()) g_touched.insert(book->GetFormID());
+            if (!g_free && !g_blood && WritingTools::LastInkwell() != 0) g_touched.insert(WritingTools::LastInkwell());
             if (readText) *readText = std::move(saved.text);
             SKSE::log::info("[Editor] Saved");
             return SaveResult::Saved;
@@ -315,6 +311,7 @@ namespace InkAndQuill::Editor {
 
         void EnterEditMode()
         {
+            Bookmarks::CloseList();
             auto* movie = BookMovie();
             if (!movie || !SendContent(movie)) {
                 EndSession();
@@ -532,6 +529,17 @@ namespace InkAndQuill::Editor {
                 EndSession();
                 return;
             }
+            if (!WritingTools::HasInk() && !WritingTools::CanBleed()) {
+                // Blood offered here would only end in a refused save, with nothing left but discarding.
+                SKSE::log::info("[Editor] No ink, and too weak to write in blood: can't write");
+                if (g_sessionBlank != 0) {
+                    Notify(Strings::Get("$IQ_TooWeak"));
+                } else {
+                    ShowNotice(Strings::Get("$IQ_TooWeak"));
+                }
+                EndSession();
+                return;
+            }
             if (!WritingTools::HasInk()) {
                 SKSE::log::info("[Editor] No ink: offering blood");
                 ShowPrompt(Strings::Get("$IQ_BloodPrompt"), { "$IQ_BloodYes", "$IQ_BloodNo" }, 1, new BloodCallback());
@@ -558,20 +566,21 @@ namespace InkAndQuill::Editor {
 
         // ---- Menu and input ----
 
-        // The inventory shows one blank fewer and the client's book: an update naming an item queues it, and one naming
-        // none makes the menu redo the queued items' lines (InventoryMenu::ProcessMessage, AE id 51848).
-        void RefreshInventory(std::vector<std::pair<RE::FormID, RE::FormID>> swapped)
+        // The inventory shows the touched items as they are now: an update naming an item queues it, and one naming none
+        // makes the menu redo the queued items' lines (InventoryMenu::ProcessMessage, AE id 51848).
+        void RefreshInventory(std::set<RE::FormID> touched)
         {
-            SKSE::GetTaskInterface()->AddTask([swapped = std::move(swapped)]() {
+            SKSE::GetTaskInterface()->AddTask([touched = std::move(touched)]() {
                 try {
                     auto* player = RE::PlayerCharacter::GetSingleton();
                     if (!player) return;
-                    for (const auto& [blank, book] : swapped) {
-                        SKSE::log::info("[Editor] Refreshing the inventory: blank {:08X} became {:08X}", blank, book);
-                        RE::SendUIMessage::SendInventoryUpdateMessage(player, RE::TESForm::LookupByID<RE::TESBoundObject>(book));
-                        RE::SendUIMessage::SendInventoryUpdateMessage(player, RE::TESForm::LookupByID<RE::TESBoundObject>(blank));
+                    std::string ids;
+                    for (const auto id : touched) {
+                        RE::SendUIMessage::SendInventoryUpdateMessage(player, RE::TESForm::LookupByID<RE::TESBoundObject>(id));
+                        ids += std::format("{}{:08X}", ids.empty() ? "" : ", ", id);
                     }
                     RE::SendUIMessage::SendInventoryUpdateMessage(player, nullptr);
+                    SKSE::log::info("[Editor] Refreshed in the inventory: {}", ids);
                 } catch (const std::exception& e) {
                     SKSE::log::error("[Editor] Refreshing the inventory failed: {}", e.what());
                 }
@@ -589,9 +598,10 @@ namespace InkAndQuill::Editor {
                 }
                 if (a_event && a_event->menuName == RE::BookMenu::MENU_NAME && !a_event->opening) {
                     g_bookOpen = false;
+                    Bookmarks::OnBookClosed();
                     LeaveEditMode("the book menu closed");
                     // Only now: refreshing it under the open book menu broke the menu's navigation (Physical Diaries).
-                    if (!g_swapped.empty()) RefreshInventory(std::exchange(g_swapped, {}));
+                    if (!g_touched.empty()) RefreshInventory(std::exchange(g_touched, {}));
                     g_blankOnOpen = 0;
                     // A session waiting for this menu that never began.
                     if (std::exchange(g_beginOnOpen, 0) != 0) EndSession();
@@ -624,12 +634,15 @@ namespace InkAndQuill::Editor {
             static inline REL::Relocation<decltype(thunk)> func;
         };
 
-        // Text typed at the caret (a key, Enter, a paste, a suggestion): the quill wiggles as it writes.
+        // Text typed at the caret (a key, Enter, a paste, a suggestion): the quill wiggles and scratches as it writes, but
+        // not for spaces and line breaks alone (nothing is inked).
         void Type(const char* text)
         {
             Invoke("AppendEditChar", text);
             Changed();
+            if (std::string_view(text).find_first_not_of(" \t\r\n") == std::string_view::npos) return;
             QuillCursor::Wrote();
+            WritingSound::Play();
         }
 
         void HandleKey(std::uint32_t scanCode)

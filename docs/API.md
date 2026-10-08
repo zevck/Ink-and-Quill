@@ -112,6 +112,10 @@ Every DLL that calls the API is listed in Ink & Quill's MCM, found by the addres
 
 A line starting `# ` (or `## `) is shown as a heading, in the editor and when the book is read ([EDITOR.md](EDITOR.md#headings)). Clients keep the `# ` in the text they store and render, and don't escape `#`; their reading text gets the same treatment from Ink & Quill's SWF.
 
+## Bookmarks
+
+Put **bookmark tags** in the reading text you give the book (not the marked text): `<a href="bookmark:Name">…</a>` where the bookmark should open (choosing it turns to the page, or spread, the tag starts on), for example around a diary entry's heading. The tag can be empty, `<a href="bookmark:Name"></a>`; text inside it shows as normal text. The name is what the player sees in the bookmark list: keep `"` and `>` out of it (an apostrophe is fine: the game turns the `href`'s double quotes into single ones, and Ink & Quill reads the name to the last quote before the `>`). A key you registered (`RegisterKeys`) stays yours even if the player binds the same key to the bookmark list key. The player picks one from Ink & Quill's bookmark list while reading ([EDITOR.md](EDITOR.md#bookmarks)). They live in your text: to add or remove one, render the text with or without its tag. Without Ink & Quill the tagged text shows as plain text.
+
 ## Writing materials
 
 `HasQuill`, `HasInk`, `UseInk` (`IQ_INK_NONE`, `IQ_INK_USED`, `IQ_INK_RAN_DRY`), `CanBleed`, `Bleed`: the same inkwells and costs as the editor (the player's settings: uses per inkwell, blood cost; they don't check `Writing.RequireQuillAndInk` or `Writing.Blood`, which are the editor's), for a client with its own writing UI. Game state: on the game's thread, as everything that touches the inventory (a UI task or an SKSE task).

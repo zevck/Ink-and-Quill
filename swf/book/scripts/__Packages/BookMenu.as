@@ -17,7 +17,7 @@ class BookMenu extends MovieClip
    static var BookMenuInstance;
    // Read as plain text by the plugins (WritingMode.cpp; the SWF ships uncompressed): installed, it turns writing on.
    // Mod-neutral: Ink & Quill ships it for every client.  Bump when a call is added; a plugin needs at least its version.
-   static var WRITING_INTERFACE = "BOOKMENU_WRITING_INTERFACE=4";
+   static var WRITING_INTERFACE = "BOOKMENU_WRITING_INTERFACE=5";
    // Text written in blood (2): dark red, marked in the plugin's text between these two
    // private-use characters (see EditBuildMarked, MarkBlood).
    static var BLOOD_COLOR = 0x2B0202;
@@ -33,6 +33,9 @@ class BookMenu extends MovieClip
    static var NOTE_X_OFFSET = 20;
    static var NOTE_Y_OFFSET = 10;
    static var CACHED_PAGES = 4;
+   static var BOOKMARK_MARK = 0xE010;  // a bookmark tag's place while the text is set (TakeBookmarkTags)
+   static var CONTENTS_SELECTED = "#6B1A1A";  // the chosen bookmark in the list
+   static var MAX_PAGINATION_STEPS = 100000;  // FinishPagination's guard
    static var EDIT_FIELD_HEIGHT = 20000;   // ~40 note pages before the edit field would scroll
    static var EDIT_MASK_OVERHANG = 12;
    static var SUGGEST_COLOR = 0x2A2520;   // a suggestion's faded ink (lighter is unreadable on the vanilla page)
@@ -58,6 +61,14 @@ class BookMenu extends MovieClip
    var aSegs;            // the text as segments: {locked, body, editable} lengths, in order (see EditBuildMarked)
    var oContentFmt;      // entry text's format (config font, content size)
    var bTextReceived;    // SetBookText has run (EditReady)
+   var aBookmarks;       // the reading text's bookmarks, {name, pos}, in order (docs/EDITOR.md#bookmarks)
+   var ContentsClip;     // the bookmark list drawn over the open spread (ContentsOpen), its field and state
+   var ContentsField;
+   var sContentsTitle;
+   var oContentsFmt;     // the list's font and size: the first bookmarked spot's
+   var iContentsSel;
+   var iContentsPerSide;
+   var iContentsShownFrom;   // books: the list's spread in the engine's 4 page slots (0 or 2), like iEditShownFrom
    var sBookText;        // the text reading shows now (SetBookText): ReturnToReading with no text reads it again
    var bBlood;           // this writing session is in blood: typed text is red (EditSetBlood)
    var oEditMarked;      // marked text from the plugin (SetEditMarked) for the next edit mode: {text, font, size}
@@ -139,6 +150,10 @@ class BookMenu extends MovieClip
    function EnterEditMode()
    {
       this.bEditMode = true;
+      if(this.ContentsClip != undefined)
+      {
+         this.ContentsClip._visible = false;
+      }
       this.bBlood = false;
       this.bHideCaret = false;
       // The page being read (at the book's opening: page 0). A book's spread is in engine
@@ -475,6 +490,10 @@ class BookMenu extends MovieClip
       while(j >= 0)
       {
          var p = starts[j];
+         while(text.charCodeAt(p) == BookMenu.BOOKMARK_MARK)
+         {
+            p++;  // a bookmark at the heading: the marker stays (FindBookmarks takes it out), the heading is read after it
+         }
          var level = BookMenu.HeadingLevel(text, p);
          if(level > 0)
          {
@@ -1513,6 +1532,10 @@ class BookMenu extends MovieClip
       {
          return this.EditTurnPage(aiDelta);
       }
+      if(this.ContentsClip._visible)
+      {
+         return this.ContentsTurn(aiDelta);
+      }
       // ---- Original TurnPage logic ----
       var _loc2_ = this.iLeftPageNumber + aiDelta;
       var _loc4_ = _loc2_ >= 0 && _loc2_ < this.PageInfoA.length;
@@ -1643,12 +1666,14 @@ class BookMenu extends MovieClip
       }
       this.sBookText = astrText;
       this.ReferenceTextField.verticalAutoSize = "top";
-      this.ReferenceTextField.SetText(this.PageHtml(astrText),true);
+      var names = [];
+      this.ReferenceTextField.SetText(this.PageHtml(BookMenu.TakeBookmarkTags(astrText, names)),true);
       if(abNote)
       {
          this.ReferenceTextField._width = BookMenu.NOTE_WIDTH;
       }
       BookMenu.ReadHeadings(this.ReferenceTextField);
+      this.FindBookmarks(names);
       this.PageInfoA.push({pageTop:0,pageHeight:this.iMaxPageHeight});
       this.iCurrentLine = 0;
       this.iPaginationIndex = setInterval(this,"CalculatePagination",30);
@@ -1733,6 +1758,261 @@ class BookMenu extends MovieClip
       this.UpdatePages();
    }
 
+   // ---- Bookmarks (docs/EDITOR.md#bookmarks) ----
+
+   // A client's bookmark tags, <a href="bookmark:Name">...</a>, out of the HTML: each leaves a marker, its name in names.
+   // Either quote: the game hands the book href='...' for a client's href="...".
+   static function TakeBookmarkTags(html, names)
+   {
+      var lower = html.toLowerCase();
+      var out = "";
+      var from = 0;
+      while(true)
+      {
+         var hit = lower.indexOf("bookmark:", from);
+         if(hit < 0)
+         {
+            break;
+         }
+         var open = lower.lastIndexOf("<a", hit);
+         var close = html.indexOf(">", hit);
+         if(open < from || close < 0)
+         {
+            out += html.substring(from, hit + 9);
+            from = hit + 9;
+            continue;
+         }
+         // The name ends at the last quote like the one before it, ahead of the ">" (the game turns " into ': Sun's Dawn).
+         var quote = html.charAt(hit - 1);
+         var nameEnd = close;
+         if(quote == "\"" || quote == "'")
+         {
+            var q = html.lastIndexOf(quote, close);
+            if(q > hit)
+            {
+               nameEnd = q;
+            }
+         }
+         names.push(html.substring(hit + 9, nameEnd));
+         out += html.substring(from, open) + String.fromCharCode(BookMenu.BOOKMARK_MARK);
+         from = close + 1;
+         // Its closing tag, if one comes before the next link.
+         var end = lower.indexOf("</a>", from);
+         var next = lower.indexOf("<a", from);
+         if(end >= 0 && (next < 0 || end < next))
+         {
+            out += html.substring(from, end);
+            from = end + 4;
+         }
+      }
+      return out + html.substring(from);
+   }
+
+   // The markers' places in the laid-out text, then the markers out (before pagination: they'd take space).
+   function FindBookmarks(names)
+   {
+      this.aBookmarks = [];
+      var tf = this.ReferenceTextField;
+      var mark = String.fromCharCode(BookMenu.BOOKMARK_MARK);
+      var pos = tf.text.indexOf(mark);
+      while(pos >= 0 && this.aBookmarks.length < names.length)
+      {
+         tf.replaceText(pos, pos + 1, "");
+         this.aBookmarks.push({name:names[this.aBookmarks.length], pos:pos});
+         pos = tf.text.indexOf(mark, pos);
+      }
+   }
+
+   // Every page laid out now (vanilla lays out one a tick: a jump past them broke the pages).
+   function FinishPagination()
+   {
+      var guard = 0;
+      while(this.iPaginationIndex != -1 && guard < BookMenu.MAX_PAGINATION_STEPS)
+      {
+         this.CalculatePagination();
+         guard++;
+      }
+   }
+
+   // The reading page a text position is on.
+   function PageOfTextPos(pos)
+   {
+      var tf = this.ReferenceTextField;
+      var r = tf.getCharBoundaries(Math.max(0, Math.min(pos, tf.length - 1)));
+      var y = r == undefined ? 0 : r.top;
+      var p = 0;
+      while(p + 1 < this.PageInfoA.length && this.PageInfoA[p + 1].pageTop <= y)
+      {
+         p++;
+      }
+      return p;
+   }
+
+   // Reading: page p (a book: its spread) at once, the engine's page slots kept as they are (it shows the spread at
+   // the same offset in them).  False if it's out of range or already open.
+   function JumpToPage(p)
+   {
+      if(this.bEditMode)
+      {
+         return false;
+      }
+      this.FinishPagination();
+      var count = this.bNote ? this.PageInfoA.length - 1 : this.PageInfoA.length;
+      var left = this.bNote ? p : p - p % 2;
+      if(p < 0 || p >= count || left == this.iLeftPageNumber)
+      {
+         return false;
+      }
+      var shown = this.iLeftPageNumber - this.iPageSetIndex;
+      while(this.BookPages.length)
+      {
+         this.BookPages.pop().removeMovieClip();
+      }
+      this.iLeftPageNumber = left;
+      this.iPageSetIndex = left - shown;
+      this.UpdatePages();
+      return true;
+   }
+
+   // ---- The bookmark list (docs/EDITOR.md#bookmarks) ----
+
+   // From the plugin: the list over the open spread, the bookmark nearest the open page chosen.  False with no bookmarks.
+   function ContentsOpen(title)
+   {
+      if(this.bEditMode || this.aBookmarks == undefined || !this.aBookmarks.length)
+      {
+         return false;
+      }
+      this.FinishPagination();
+      var i = 0;
+      while(i < this.aBookmarks.length)
+      {
+         this.aBookmarks[i].page = this.PageOfTextPos(this.aBookmarks[i].pos);
+         i++;
+      }
+      if(this.ContentsClip == undefined)
+      {
+         // A copy of the reference clip: the book's font comes with it.
+         this.ContentsClip = this.ReferenceText_mc.duplicateMovieClip("ContentsClip", this.getNextHighestDepth());
+         this.ContentsClip.gotoAndStop(1);
+         this.ContentsField = this.ContentsClip.PageTextField;
+         this.ContentsField.html = true;
+         this.ContentsField.multiline = true;
+         this.ContentsField.wordWrap = false;
+         this.ContentsField.selectable = false;
+         this.ContentsField.noTranslate = true;
+         if(this.bNote)
+         {
+            this.ContentsField._width = BookMenu.NOTE_WIDTH;
+            this.ContentsClip._x = Stage.visibleRect.x + BookMenu.NOTE_X_OFFSET;
+            this.ContentsClip._y = Stage.visibleRect.y + BookMenu.NOTE_Y_OFFSET;
+         }
+      }
+      this.sContentsTitle = title;
+      var at = Math.min(this.aBookmarks[0].pos, this.ReferenceTextField.length - 1);
+      this.oContentsFmt = this.ReferenceTextField.getTextFormat(at, at + 1);
+      // Lines a side holds, from one line's height in the book's font.
+      this.ContentsField.htmlText = this.ContentsLine("Ag", false);
+      var lineHeight = Math.max(1, this.ContentsField.getLineMetrics(0).height);
+      this.iContentsPerSide = Math.max(1, Math.floor((this.iMaxPageHeight - 6) / lineHeight) - 2);
+      this.iContentsSel = 0;
+      while(this.iContentsSel + 1 < this.aBookmarks.length && this.aBookmarks[this.iContentsSel + 1].page <= this.iLeftPageNumber)
+      {
+         this.iContentsSel++;
+      }
+      this.iContentsShownFrom = this.iLeftPageNumber - this.iPageSetIndex;
+      this.ContentsClip._visible = true;
+      return true;
+   }
+
+   // The engine's page turn (a click or an arrow key) while the list is open: the list's next or previous spread, the
+   // same line on it.  False when there's none: no turn animation, and the book's pages stay as they are.
+   function ContentsTurn(aiDelta)
+   {
+      var count = this.aBookmarks.length;
+      var spread = this.bNote ? this.iContentsPerSide : this.iContentsPerSide * 2;
+      var to = Math.floor(this.iContentsSel / spread) + (aiDelta > 0 ? 1 : -1);
+      if(to < 0 || to * spread >= count)
+      {
+         return false;
+      }
+      this.iContentsSel = Math.min(count - 1, this.iContentsSel + (aiDelta > 0 ? spread : -spread));
+      if(!this.bNote)
+      {
+         this.iContentsShownFrom = aiDelta > 0 ? Math.abs(aiDelta) : 0;
+      }
+      return true;
+   }
+
+   // From the plugin, while the list is open: "up", "down", "enter", "close".  What happened: "moved", "closed", or
+   // "jumped" (the chosen bookmark's page is open, the list closed).
+   function ContentsKey(key)
+   {
+      var count = this.aBookmarks.length;
+      if(key == "up" || key == "down")
+      {
+         this.iContentsSel = (this.iContentsSel + (key == "up" ? count - 1 : 1)) % count;
+         return "moved";
+      }
+      this.ContentsClip._visible = false;
+      // The list's turns moved the open spread in the engine's page slots: the book's pages go where it shows now.
+      if(this.iLeftPageNumber - this.iPageSetIndex != this.iContentsShownFrom)
+      {
+         this.iPageSetIndex = this.iLeftPageNumber - this.iContentsShownFrom;
+         while(this.BookPages.length)
+         {
+            this.BookPages.pop().removeMovieClip();
+         }
+         this.UpdatePages();
+      }
+      if(key == "enter")
+      {
+         this.JumpToPage(this.aBookmarks[this.iContentsSel].page);
+         return "jumped";
+      }
+      return "closed";
+   }
+
+   function ContentsLine(text, selected)
+   {
+      var f = this.oContentsFmt;
+      var font = "<font face='" + (f.font == undefined ? "$SkyrimBooks" : f.font) + "' size='" + (f.size > 0 ? f.size : this.PageTextSize()) + "'>";
+      if(selected)
+      {
+         return font + "<font color='" + BookMenu.CONTENTS_SELECTED + "'><u>" + text + "</u></font></font>";
+      }
+      return font + text + "</font>";
+   }
+
+   // One side of the open spread while the list is open (0 the left or a note, 1 the right); the turning leaf's sides
+   // show nothing.  The left side starts with the title, a spread holds one list page.
+   function ShowContentsSide(aiPageOffset)
+   {
+      var i = 0;
+      while(i < this.BookPages.length)
+      {
+         this.BookPages[i]._visible = false;
+         i++;
+      }
+      var side = aiPageOffset - this.iContentsShownFrom;
+      if(side < 0 || side > (this.bNote ? 0 : 1))
+      {
+         this.ContentsField.htmlText = "";
+         return undefined;
+      }
+      var perSpread = this.bNote ? this.iContentsPerSide : this.iContentsPerSide * 2;
+      var first = Math.floor(this.iContentsSel / perSpread) * perSpread + side * this.iContentsPerSide;
+      var html = side == 0 ? this.ContentsLine(this.sContentsTitle, false) + "<br>" + this.ContentsLine(" ", false) + "<br>" : "";
+      i = first;
+      while(i < Math.min(first + this.iContentsPerSide, this.aBookmarks.length))
+      {
+         var b = this.aBookmarks[i];
+         html += this.ContentsLine(b.name + "  -  " + (b.page + 1), i == this.iContentsSel) + "<br>";
+         i++;
+      }
+      this.ContentsField.htmlText = html;
+   }
+
    function SetLeftPageNumber(aiPageNum)
    {
       if(aiPageNum < this.PageInfoA.length)
@@ -1754,6 +2034,11 @@ class BookMenu extends MovieClip
          {
             this.ShowEditPage(p);
          }
+         return undefined;
+      }
+      if(this.ContentsClip._visible)
+      {
+         this.ShowContentsSide(aiPageOffset);
          return undefined;
       }
       var _loc2_ = 0;
@@ -1788,7 +2073,7 @@ class BookMenu extends MovieClip
             }
             _loc3_ = _loc3_ + 1;
          }
-         if(!_loc4_ && (this.PageInfoA.length > this.iPageSetIndex + _loc2_ + 1 || this.iPaginationIndex == -1 && this.PageInfoA.length > this.iPageSetIndex + _loc2_))
+         if(!_loc4_ && this.iPageSetIndex + _loc2_ >= 0 && (this.PageInfoA.length > this.iPageSetIndex + _loc2_ + 1 || this.iPaginationIndex == -1 && this.PageInfoA.length > this.iPageSetIndex + _loc2_))
          {
             this.CreateDisplayPage(this.PageInfoA[this.iPageSetIndex + _loc2_].pageTop,this.PageInfoA[this.iPageSetIndex + _loc2_].pageTop + this.PageInfoA[this.iPageSetIndex + _loc2_].pageHeight,this.iPageSetIndex + _loc2_);
          }

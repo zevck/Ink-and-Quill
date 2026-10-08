@@ -1,0 +1,21 @@
+FormKey: 000803:InkAndQuill.esp
+EditorID: InkAndQuillWritingSD
+Type: Standard
+Category: 0172A1:Skyrim.esm
+SoundFiles:
+- Data\Sound\FX\InkAndQuill\Writing_01.wav
+- Data\Sound\FX\InkAndQuill\Writing_02.wav
+- Data\Sound\FX\InkAndQuill\Writing_03.wav
+- Data\Sound\FX\InkAndQuill\Writing_04.wav
+- Data\Sound\FX\InkAndQuill\Writing_05.wav
+- Data\Sound\FX\InkAndQuill\Writing_06.wav
+- Data\Sound\FX\InkAndQuill\Writing_07.wav
+- Data\Sound\FX\InkAndQuill\Writing_08.wav
+- Data\Sound\FX\InkAndQuill\Writing_09.wav
+- Data\Sound\FX\InkAndQuill\Writing_10.wav
+OutputModel: 0B75FB:Skyrim.esm
+LoopAndRumble:
+  Unknown: 2
+PercentFrequencyVariance: 8
+Priority: 128
+StaticAttenuation: 4

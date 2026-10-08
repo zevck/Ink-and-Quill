@@ -81,24 +81,37 @@ namespace InkAndQuill::QuillCursor {
         std::string g_caret;                             // book.swf's last answer (EditCaretPoint)
         std::optional<RE::NiPoint2> g_stagePoint;        // the caret on the stage, from it
         int g_slot = 0;                                  // the engine's page slot the caret is on
+        int g_caretPage = -1;                            // the page the caret is on (book.swf's numbering)
+        int g_lastCaretPage = -1, g_lastCaretSlot = -1;  // last frame's: a change is a page turn
 
-        // The writing wiggle: a sway about the nib, across the screen, fading after the last typed key (Wrote).
+        // The writing wiggle, fading after the last typed key (Wrote): a sway about the nib, across the screen, and a stroke
+        // up and to the right along the page and back, a quarter turn behind the sway.
         using Clock = std::chrono::steady_clock;
         constexpr float kWiggleDegrees = 1.5f;  // at its widest
         constexpr float kWiggleHz = 5.f;
-        constexpr float kWiggleFade = 0.15f;    // seconds for it to fall to about a third
+        constexpr float kWiggleHold = 0.1f;     // seconds at full swing after a key (no dip between keys)
+        constexpr float kWiggleFade = 0.025f;   // then seconds for it to fall to about a third
+        constexpr float kWiggleEnd = kWiggleHold + 4.f * kWiggleFade;  // stopped (under 2% left)
+        constexpr RE::NiPoint2 kStroke{ 3.f, -2.f };  // stage units at its farthest (y down)
         std::optional<Clock::time_point> g_wiggleBegan, g_lastWrote;  // the swing's start (its phase), the last key
 
-        // Its angle now, in radians: 0 once it has faded.
-        float WiggleAngle()
+        struct Wiggle
         {
-            if (!g_lastWrote || !g_wiggleBegan) return 0.f;
+            float angle = 0.f;   // radians
+            RE::NiPoint2 stroke;  // stage units
+        };
+
+        // Now: nothing once it has faded.
+        Wiggle WiggleNow()
+        {
+            if (!g_lastWrote || !g_wiggleBegan) return {};
             const auto now = Clock::now();
             const float since = std::chrono::duration<float>(now - *g_lastWrote).count();
-            if (since > 5.f * kWiggleFade) return 0.f;
-            const float phase = std::chrono::duration<float>(now - *g_wiggleBegan).count();
-            const float degrees = kWiggleDegrees * std::sin(2.f * std::numbers::pi_v<float> * kWiggleHz * phase) * std::exp(-since / kWiggleFade);
-            return degrees * std::numbers::pi_v<float> / 180.f;
+            if (since > kWiggleEnd) return {};
+            const float turn = 2.f * std::numbers::pi_v<float> * kWiggleHz * std::chrono::duration<float>(now - *g_wiggleBegan).count();
+            const float fade = since < kWiggleHold ? 1.f : std::exp(-(since - kWiggleHold) / kWiggleFade);
+            const float out = (1.f - std::cos(turn)) * 0.5f * fade;  // 0 at rest, 1 at the stroke's end
+            return { kWiggleDegrees * std::sin(turn) * fade * std::numbers::pi_v<float> / 180.f, { kStroke.x * out, kStroke.y * out } };
         }
 
         // Adjust mode (Settings::kQuillAdjust): the numpad moves or turns the quill.
@@ -322,6 +335,7 @@ namespace InkAndQuill::QuillCursor {
             if (std::sscanf(g_caret.c_str(), "%f,%f,%f,%f,%f,%f,%f", &side, &number, &x, &y, &gx, &gy, &slot) >= 6) {
                 g_stagePoint = RE::NiPoint2{ gx, gy };
                 g_slot = static_cast<int>(slot);
+                g_caretPage = static_cast<int>(number);
                 if (const auto at = OnPage(g_slot, gx, gy)) {
                     point = at->point;
                     g_caretOnSheet = at->onSheet;
@@ -339,13 +353,15 @@ namespace InkAndQuill::QuillCursor {
 
         bool Perspective(RE::NiCamera* camera) { return camera && !camera->GetRuntimeData2().viewFrustum.bOrtho; }
 
-        // The quill in the world for a View: the nib `hover` above the spot beside the caret's, toward the camera.
-        std::optional<RE::NiTransform> ViewWorld(const View& view)
+        // The quill in the world for a View: the nib `hover` above the spot beside the caret's (moved by `shift` on the
+        // stage), toward the camera.
+        std::optional<RE::NiTransform> ViewWorld(const View& view, RE::NiPoint2 shift = {})
         {
             auto* page = Page();
             auto* camera = Camera();
             if (!page || !camera) return std::nullopt;
-            const auto spot = g_stagePoint ? OnPage(g_slot, g_stagePoint->x + view.dx, g_stagePoint->y + view.dy) : std::nullopt;
+            auto spot = g_stagePoint ? OnPage(g_slot, g_stagePoint->x + view.dx + shift.x, g_stagePoint->y + view.dy + shift.y) : std::nullopt;
+            if (!spot && g_stagePoint && (shift.x != 0.f || shift.y != 0.f)) spot = OnPage(g_slot, g_stagePoint->x + view.dx, g_stagePoint->y + view.dy);  // shifted off the sheet
             const auto spotWorld = page->world * (spot ? spot->point : g_anchor);
             auto up = camera->world.translate - spotWorld;
             const float length = up.Length();
@@ -377,18 +393,22 @@ namespace InkAndQuill::QuillCursor {
             g_still = still ? g_still + 1 : 0;
             // No caret, or one on a page that isn't shown (paging to a title page): no quill either, and once the caret is
             // back it waits again for the page to stop moving (it turns).  Waiting there doesn't count toward the timeout.
-            if (!g_stagePoint) {
+            const bool turned = g_stagePoint && (g_caretPage != g_lastCaretPage || g_slot != g_lastCaretSlot);
+            if (g_stagePoint) g_lastCaretPage = g_caretPage, g_lastCaretSlot = g_slot;
+            if (!g_stagePoint || turned) {
                 if (std::exchange(g_placed, false)) g_quill->GetFlags().set(RE::NiAVObject::Flag::kHidden);
-                return;
+                if (!g_stagePoint) return;
+                g_waited = 0;  // a turn's wait doesn't count toward the timeout
             }
             if (!g_placed && ++g_waited == kPlaceTimeout) RestoreCaret();
-            auto world = g_view ? ViewWorld(*g_view) : std::nullopt;
+            const auto wiggle = WiggleNow();
+            auto world = g_view ? ViewWorld(*g_view, wiggle.stroke) : std::nullopt;
             if (!world) return;
             // Writing: swayed about the nib (it stays on the text), around the line of sight.
-            if (const float angle = WiggleAngle(); angle != 0.f) {
+            if (wiggle.angle != 0.f) {
                 if (auto* camera = Camera()) {
                     RE::NiMatrix3 turn;
-                    turn.MakeRotation(angle, camera->world.rotate * RE::NiPoint3{ 1.f, 0.f, 0.f });  // a camera looks along +x
+                    turn.MakeRotation(wiggle.angle, camera->world.rotate * RE::NiPoint3{ 1.f, 0.f, 0.f });  // a camera looks along +x
                     const auto nib = *world * g_nib;
                     world->rotate = turn * world->rotate;
                     world->translate = nib - world->rotate * (g_nib * world->scale);
@@ -488,6 +508,7 @@ namespace InkAndQuill::QuillCursor {
         g_quill.reset(quill);
         g_placed = false;
         g_waited = 0;
+        g_lastCaretPage = g_lastCaretSlot = -1;
         // The quill is the caret: none from the start, so it doesn't blink before the quill is in place.  Adjust mode
         // keeps the real one, to line the nib up against.
         if (!Settings::QuillAdjust()) g_caretHidden = Book::Call("EditHideCaret", nullptr, "1");
@@ -531,7 +552,7 @@ namespace InkAndQuill::QuillCursor {
     {
         const auto now = Clock::now();
         // A fresh swing starts at rest; one still going keeps its phase, so typing on doesn't jerk it.
-        if (!g_lastWrote || std::chrono::duration<float>(now - *g_lastWrote).count() > 5.f * kWiggleFade) g_wiggleBegan = now;
+        if (!g_lastWrote || std::chrono::duration<float>(now - *g_lastWrote).count() > kWiggleEnd) g_wiggleBegan = now;
         g_lastWrote = now;
     }
 
