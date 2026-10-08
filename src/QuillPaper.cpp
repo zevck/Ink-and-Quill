@@ -125,7 +125,7 @@ namespace InkAndQuill::QuillPaper {
                 u1 = std::max(u1, vertex.u), v1 = std::max(v1, vertex.v);
             }
             u0 -= shiftU, v0 -= shiftV;
-            SKSE::log::info("[Quill] Page slot {}: '{}', {} vertices, {} triangles, UVs u {:.3f}-{:.3f} v {:.3f}-{:.3f}", slot,
+            SKSE::log::debug("[Quill] Page slot {}: '{}', {} vertices, {} triangles, UVs u {:.3f}-{:.3f} v {:.3f}-{:.3f}", slot,
                             object->name.c_str(), g_sheets[slot].vertices.size(), g_sheets[slot].triangles.size(), u0, u1, v0, v1);
         }
     }

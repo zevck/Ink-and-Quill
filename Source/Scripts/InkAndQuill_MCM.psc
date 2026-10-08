@@ -16,6 +16,9 @@ int _requireOid
 int _usesOid
 int _bloodOid
 int _bloodCostOid
+int _quillOid
+int _adjustOid
+int _debugLogOid
 
 event OnConfigInit()
     ModName = "Ink & Quill"
@@ -46,8 +49,13 @@ event OnPageReset(string page)
     _usesOid = AddSliderOption("$IQ_InkwellUses", GetSetting("Writing.InkwellUses"), UsesFormat(), WritingFlags())
     _bloodOid = AddToggleOption("$IQ_Blood", GetSetting("Writing.Blood") != 0, WritingFlags())
     _bloodCostOid = AddSliderOption("$IQ_BloodCost", GetSetting("Writing.BloodCost"), "{0}%", BloodCostFlags())
+    _quillOid = AddToggleOption("$IQ_QuillCursor", GetSetting("Writing.QuillCursor") != 0)
 
     SetCursorPosition(1)
+    AddHeaderOption("$IQ_HeaderDebug")
+    _adjustOid = AddToggleOption("$IQ_QuillAdjust", GetSetting("Debug.QuillAdjust") != 0)
+    _debugLogOid = AddToggleOption("$IQ_DebugLog", GetSetting("Debug.Logging") != 0)
+    AddEmptyOption()
     AddHeaderOption("$IQ_HeaderClients")
     int count = GetClientCount()
     if count == 0
@@ -70,6 +78,12 @@ string function SettingOf(int oid)
         return "Writing.Blood"
     elseif oid == _bloodCostOid
         return "Writing.BloodCost"
+    elseif oid == _quillOid
+        return "Writing.QuillCursor"
+    elseif oid == _adjustOid
+        return "Debug.QuillAdjust"
+    elseif oid == _debugLogOid
+        return "Debug.Logging"
     elseif oid == _editKeyOid
         return "Keys.Edit"
     endif
@@ -101,7 +115,7 @@ function UpdateFlags()
 endfunction
 
 event OnOptionSelect(int oid)
-    if oid == _requireOid || oid == _bloodOid
+    if oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
         string name = SettingOf(oid)
         bool enabled = GetSetting(name) == 0
         SetSetting(name, enabled as int)
@@ -154,7 +168,7 @@ event OnOptionDefault(int oid)
     int value = GetSetting(name)
     if oid == _editKeyOid
         SetKeyMapOptionValue(oid, value)
-    elseif oid == _requireOid || oid == _bloodOid
+    elseif oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
         SetToggleOptionValue(oid, value != 0)
         UpdateFlags()
     else
@@ -173,6 +187,12 @@ event OnOptionHighlight(int oid)
         SetInfoText("$IQ_TipBlood")
     elseif oid == _bloodCostOid
         SetInfoText("$IQ_TipBloodCost")
+    elseif oid == _quillOid
+        SetInfoText("$IQ_TipQuillCursor")
+    elseif oid == _adjustOid
+        SetInfoText("$IQ_TipQuillAdjust")
+    elseif oid == _debugLogOid
+        SetInfoText("$IQ_TipDebugLog")
     elseif oid > 0
         SetInfoText("$IQ_TipClients")
     endif

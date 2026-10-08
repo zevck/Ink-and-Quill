@@ -50,20 +50,19 @@ namespace InkAndQuill::QuillCursor {
         };
         std::optional<View> g_view;
 
-        // A pose saved before View (in the page's space, the caret at the page's centre): used until the book
-        // settles, then turned into a View and saved beside it.
-        struct Pose {
-            RE::NiPoint3 translate;
-            RE::NiMatrix3 rotate;
-            float scale = 1.f;
-        };
-        std::optional<Pose> g_legacy;
-        int g_still = 0;           // frames the page hasn't moved (the quill shows, a legacy pose becomes a View)
+        // The pose tuned in game (2026-10-07, a letter; books look right with it too): the INI's, if any, is used instead.
+        const View kDefaultView{ 0.0677f, -7.877f, 6.116f, 0.7578f,
+                                 RE::NiMatrix3{ RE::NiPoint3{ -0.40820244f, -0.48276395f, -0.77473265f },
+                                                RE::NiPoint3{ 0.25884753f, -0.87511283f, 0.40892613f },
+                                                RE::NiPoint3{ -0.8754f, -0.0336f, 0.4822f } } };
+
+        int g_still = 0;           // frames the page hasn't moved (the quill shows once it's in place)
         RE::NiPoint3 g_lastPage;   // the page's world position last frame
         bool g_onSheet = false;    // the last OnPage point came from the paper, not the flat quad
         bool g_caretOnSheet = false;  // the caret's point did
         bool g_placed = false;     // the quill has been shown: it stays hidden until it's in place
-        std::string g_model;       // its pose's section in the pose file: "Book" or "Note"
+        bool g_caretHidden = false;  // book.swf draws no caret: the quill is it (from the start, not once it's placed)
+        std::string g_model;       // its pose's key in the INI: "Book" or "Note"
 
         // The page text's quad (PageText), in its own space: the corners the render target's
         // corners land on, and the UVs they have.  Read once per book.
@@ -89,48 +88,32 @@ namespace InkAndQuill::QuillCursor {
         constexpr int kSteps = static_cast<int>(std::size(kMoveSteps));
         int g_samples = 0;
 
-        // The configured pose, for books and for notes, each the other's when it has none (adjust mode: numpad Enter
-        // saves, "." restores): "View = dx dy hover scale" and the rotation's rows, under [Book] or [Note].  A "Pose"
-        // line from before View is kept and read only when there's no View.
-        std::string PosePath() { return std::filesystem::absolute("Data/SKSE/Plugins/InkAndQuill_QuillPose.ini").string(); }
+        // A pose saved in adjust mode (numpad Enter), for books or notes, each the other's when it has none:
+        // "dx dy hover scale" and the rotation's rows, under [QuillPose] in Ink & Quill's INI.  Else kDefaultView.
+        constexpr auto kPoseSection = "QuillPose";
 
-        // Four numbers, then the nine of a rotation's rows.
-        std::optional<std::pair<std::array<float, 4>, RE::NiMatrix3>> ReadLine(const std::string& section, const char* key)
+        std::optional<View> ReadView(const std::string& key)
         {
             char text[512] = {};
-            GetPrivateProfileStringA(section.c_str(), key, "", text, sizeof(text), PosePath().c_str());
+            GetPrivateProfileStringA(kPoseSection, key.c_str(), "", text, sizeof(text), Settings::IniPath().c_str());
             std::istringstream in(text);
-            std::array<float, 4> head{};
-            RE::NiMatrix3 rotate;
-            auto& r = rotate.entry;
-            if (!(in >> head[0] >> head[1] >> head[2] >> head[3] >> r[0][0] >> r[0][1] >> r[0][2] >> r[1][0] >> r[1][1] >> r[1][2] >>
+            View view;
+            auto& r = view.rotate.entry;
+            if (!(in >> view.dx >> view.dy >> view.hover >> view.scale >> r[0][0] >> r[0][1] >> r[0][2] >> r[1][0] >> r[1][1] >> r[1][2] >>
                   r[2][0] >> r[2][1] >> r[2][2])) {
                 return std::nullopt;
             }
-            return std::pair{ head, rotate };
+            return view;
         }
 
+        // True when the INI has one, else the built-in pose.
         bool LoadPose()
         {
-            g_view.reset();
-            g_legacy.reset();
-            g_still = 0;
-            const std::string other = g_model == "Note" ? "Book" : "Note";
-            // Books and notes share a pose until one is saved for the other.
-            for (const auto& section : { g_model, other }) {
-                if (const auto line = ReadLine(section, "View")) {
-                    const auto& [h, rotate] = *line;
-                    g_view = View{ h[0], h[1], h[2], h[3], rotate };
-                    return true;
-                }
+            // This kind of book's, then the other kind's.
+            for (const auto& key : { g_model, std::string(g_model == "Note" ? "Book" : "Note") }) {
+                if ((g_view = ReadView(key))) return true;
             }
-            for (const auto& section : { g_model, other }) {
-                if (const auto line = ReadLine(section, "Pose")) {
-                    const auto& [h, rotate] = *line;
-                    g_legacy = Pose{ { h[0], h[1], h[2] }, rotate, h[3] };
-                    return true;
-                }
-            }
+            g_view = kDefaultView;
             return false;
         }
 
@@ -141,8 +124,8 @@ namespace InkAndQuill::QuillCursor {
             const auto& r = v.rotate.entry;
             const auto text = std::format("{} {} {} {} {} {} {} {} {} {} {} {} {}", v.dx, v.dy, v.hover, v.scale, r[0][0], r[0][1], r[0][2],
                                           r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2]);
-            if (!WritePrivateProfileStringA(g_model.c_str(), "View", text.c_str(), PosePath().c_str())) {
-                SKSE::log::error("[Quill] Couldn't write the pose file");
+            if (!WritePrivateProfileStringA(kPoseSection, g_model.c_str(), text.c_str(), Settings::IniPath().c_str())) {
+                SKSE::log::error("[Quill] Couldn't write the pose to the INI");
             }
         }
 
@@ -153,7 +136,7 @@ namespace InkAndQuill::QuillCursor {
             if (!object) return;
             const auto& w = object->world;
             const auto& b = object->worldBound;
-            SKSE::log::info("[Quill] {} '{}': world ({:.2f}, {:.2f}, {:.2f}) x{:.3f}, bound ({:.2f}, {:.2f}, {:.2f}) r{:.2f}",
+            SKSE::log::debug("[Quill] {} '{}': world ({:.2f}, {:.2f}, {:.2f}) x{:.3f}, bound ({:.2f}, {:.2f}, {:.2f}) r{:.2f}",
                             what, object->name.c_str(), w.translate.x, w.translate.y, w.translate.z, w.scale,
                             b.center.x, b.center.y, b.center.z, b.radius);
         }
@@ -190,6 +173,36 @@ namespace InkAndQuill::QuillCursor {
             if (tip) g_nib = *tip;
             SKSE::log::info("[Quill] Nib {} at ({:.3f}, {:.3f}, {:.3f}) in the model", tip ? "found" : "not found (a guess)", g_nib.x, g_nib.y,
                             g_nib.z);
+        }
+
+        // The book menu's scene ignores alpha testing: an alpha-tested shape's see-through texels draw solid (HFs' feather,
+        // a flat card, covered the page with its reflection).  Such a shape is blended instead and writes no depth, on
+        // copies of its properties so the world's quills keep theirs.
+        void BlendCutouts(RE::NiAVObject* quill)
+        {
+            RE::BSVisit::TraverseScenegraphGeometries(quill, [](RE::BSGeometry* geometry) {
+                auto& data = geometry->GetGeometryRuntimeData();
+                auto* alpha = data.alphaProperty.get();
+                SKSE::log::debug("[Quill] Shape '{}': alpha {} (blending {}, testing {}, threshold {})", geometry->name.c_str(),
+                                 alpha != nullptr, alpha && alpha->GetAlphaBlending(), alpha && alpha->GetAlphaTesting(),
+                                 alpha ? alpha->alphaThreshold : 0);
+                if (!alpha || !alpha->GetAlphaTesting() || alpha->GetAlphaBlending()) return RE::BSVisit::BSVisitControl::kContinue;
+                auto* alphaCopy = alpha->Clone();
+                auto* blend = alphaCopy ? skyrim_cast<RE::NiAlphaProperty*>(alphaCopy) : nullptr;
+                if (!blend) return RE::BSVisit::BSVisitControl::kContinue;
+                blend->SetAlphaBlending(true);
+                blend->SetSrcBlendMode(RE::NiAlphaProperty::AlphaFunction::kSrcAlpha);
+                blend->SetDestBlendMode(RE::NiAlphaProperty::AlphaFunction::kInvSrcAlpha);
+                data.alphaProperty.reset(blend);
+                if (auto* shaderCopy = data.shaderProperty ? data.shaderProperty->Clone() : nullptr) {
+                    if (auto* shader = skyrim_cast<RE::BSShaderProperty*>(shaderCopy)) {
+                        shader->SetFlags(RE::BSShaderProperty::EShaderPropertyFlag8::kZBufferWrite, false);
+                        data.shaderProperty.reset(shader);
+                    }
+                }
+                SKSE::log::info("[Quill] Shape '{}' is alpha tested: blended instead", geometry->name.c_str());
+                return RE::BSVisit::BSVisitControl::kContinue;
+            });
         }
 
         // The model's collision would put it back where its physics body is on every update.
@@ -240,7 +253,7 @@ namespace InkAndQuill::QuillCursor {
                 std::uint16_t uv[2];
                 std::memcpy(uv, vertex + uvAt, sizeof(uv));
                 const float u = QuillPaper::HalfToFloat(uv[0]), v = QuillPaper::HalfToFloat(uv[1]);
-                SKSE::log::info("[Quill] PageText vertex {}: ({:.3f}, {:.3f}, {:.3f}) uv ({:.3f}, {:.3f}); stride {}, uv at {}", i, p.x,
+                SKSE::log::debug("[Quill] PageText vertex {}: ({:.3f}, {:.3f}, {:.3f}) uv ({:.3f}, {:.3f}); stride {}, uv at {}", i, p.x,
                                 p.y, p.z, u, v, stride, uvAt);
                 quad.u0 = std::min(quad.u0, u), quad.u1 = std::max(quad.u1, u);
                 quad.v0 = std::min(quad.v0, v), quad.v1 = std::max(quad.v1, v);
@@ -320,47 +333,7 @@ namespace InkAndQuill::QuillCursor {
             return scene ? scene->camera.get() : nullptr;
         }
 
-        // The caret's slot's sheet at texture point (u, v), in the page's space, if it's on the page.
-        std::optional<RE::NiPoint3> SheetPoint(float u, float v)
-        {
-            const auto onSheet = QuillPaper::At(g_slot, u, v);
-            if (!onSheet || !Page()) return std::nullopt;
-            const auto point = Page()->world.Invert() * *onSheet;
-            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) || std::abs(point.z) >= 5.f) return std::nullopt;
-            return point;
-        }
-
-        // The legacy pose's page: its centre on the paper (the pose is the quill's place with the caret there).
-        RE::NiPoint3 PageCentre()
-        {
-            if (const auto point = SheetPoint((g_quad.u0 + g_quad.u1) / 2.f, (g_quad.v0 + g_quad.v1) / 2.f)) return *point;
-            return (g_quad.p00 + g_quad.p11) / 2.f;
-        }
-
         bool Perspective(RE::NiCamera* camera) { return camera && !camera->GetRuntimeData2().viewFrustum.bOrtho; }
-
-        // The legacy pose's quill in the page's space: the nib on the camera's ray through a spot beside the caret's.
-        RE::NiTransform LegacyOnPage(const Pose& pose)
-        {
-            RE::NiTransform onPage;
-            onPage.rotate = pose.rotate;
-            onPage.scale = pose.scale;
-            onPage.translate = g_anchor + pose.translate;
-            auto* page = Page();
-            auto* camera = Camera();
-            if (!page || !Perspective(camera)) return onPage;
-            const auto centre = PageCentre();
-            const auto eye = page->world.Invert() * camera->world.translate;
-            const auto nibOffset = pose.rotate * g_nib * pose.scale;
-            const auto nibThere = centre + pose.translate + nibOffset;
-            const float run = nibThere.z - eye.z;
-            if (std::abs(run) < 1e-4f) return onPage;
-            const float t = (centre.z - eye.z) / run;
-            if (t <= 1.f) return onPage;
-            const auto spot = g_anchor + (eye + (nibThere - eye) * t) - centre;
-            onPage.translate = eye + (spot - eye) / t - nibOffset;
-            return onPage;
-        }
 
         // The quill in the world for a View: the nib `hover` above the spot beside the caret's, toward the camera.
         std::optional<RE::NiTransform> ViewWorld(const View& view)
@@ -382,58 +355,6 @@ namespace InkAndQuill::QuillCursor {
             return world;
         }
 
-        // The page's points for stage points around the caret: stage units to page units there.
-        std::optional<std::pair<RE::NiPoint3, RE::NiPoint3>> StageToPage()
-        {
-            if (!g_stagePoint) return std::nullopt;
-            const auto at = OnPage(g_slot, g_stagePoint->x, g_stagePoint->y);
-            const auto across = OnPage(g_slot, g_stagePoint->x + 1.f, g_stagePoint->y);
-            const auto down = OnPage(g_slot, g_stagePoint->x, g_stagePoint->y + 1.f);
-            if (!at || !across || !down) return std::nullopt;
-            return std::pair{ *across - *at, *down - *at };
-        }
-
-        // The quill as it stands, as a View: the nib's spot is where its camera ray meets the paper's plane at the caret.
-        std::optional<View> ViewOf(const RE::NiTransform& world)
-        {
-            auto* page = Page();
-            auto* camera = Camera();
-            const auto steps = StageToPage();
-            if (!page || !camera || !steps) return std::nullopt;
-            const auto eye = camera->world.translate;
-            const auto nib = world * g_nib;
-            const auto normal = page->world.rotate * RE::NiPoint3{ 0.f, 0.f, 1.f };
-            const auto caret = page->world * g_anchor;
-            const float run = (nib - eye).Dot(normal);
-            if (std::abs(run) < 1e-4f) return std::nullopt;
-            const auto spot = eye + (nib - eye) * ((caret - eye).Dot(normal) / run);
-            const auto beside = page->world.Invert() * spot - g_anchor;
-            const auto& [across, down] = *steps;
-            const float det = across.x * down.y - down.x * across.y;
-            if (std::abs(det) < 1e-9f) return std::nullopt;
-            View view;
-            view.dx = (beside.x * down.y - down.x * beside.y) / det;
-            view.dy = (across.x * beside.y - beside.x * across.y) / det;
-            view.hover = (nib - spot).Length();
-            view.scale = world.scale;
-            view.rotate = camera->world.rotate.Transpose() * world.rotate;
-            return view;
-        }
-
-        // The legacy pose turned into a View, once the book has stopped moving (or now), and saved beside it.
-        void ConvertLegacy()
-        {
-            auto* page = Page();
-            if (!g_legacy || !page) return;
-            const auto view = ViewOf(page->world * LegacyOnPage(*g_legacy));
-            if (!view) return;
-            g_view = view;
-            g_legacy.reset();
-            SavePose();
-            SKSE::log::info("[Quill] The page-space pose is now a View: spot ({:.2f}, {:.2f}) stage units, hover {:.3f}, scale {:.4f}",
-                            view->dx, view->dy, view->hover, view->scale);
-        }
-
         void Apply()
         {
             auto* page = Page();
@@ -442,10 +363,7 @@ namespace InkAndQuill::QuillCursor {
             const bool still = (page->world.translate - g_lastPage).Length() < 1e-3f;
             g_lastPage = page->world.translate;
             g_still = still ? g_still + 1 : 0;
-            if (g_legacy && g_still >= 15) ConvertLegacy();
-            std::optional<RE::NiTransform> world;
-            if (g_view) world = ViewWorld(*g_view);
-            else if (g_legacy) world = page->world * LegacyOnPage(*g_legacy);
+            const auto world = g_view ? ViewWorld(*g_view) : std::nullopt;
             if (!world) return;
             const auto& t = world->translate;
             if (!std::isfinite(t.x) || !std::isfinite(t.y) || !std::isfinite(t.z)) return;
@@ -462,19 +380,18 @@ namespace InkAndQuill::QuillCursor {
             }
         }
 
-        void LogPose(const std::string& what)
+        void LogPose(const std::string& what, bool info = true)
         {
+            const auto level = info ? spdlog::level::info : spdlog::level::debug;
             if (g_view) {
                 const auto& v = *g_view;
                 const auto& r = v.rotate.entry;
-                SKSE::log::info("[Quill] {} spot ({:.2f}, {:.2f}) hover {:.3f} scale {:.4f} rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; "
+                spdlog::log(level, "[Quill] {} spot ({:.2f}, {:.2f}) hover {:.3f} scale {:.4f} rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; "
                                 "{:.4f} {:.4f} {:.4f}] caret {}",
                                 what, v.dx, v.dy, v.hover, v.scale, r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1],
                                 r[2][2], g_caret);
-            } else {
-                SKSE::log::info("[Quill] {} {} caret {}", what, g_legacy ? "page-space pose (not converted yet)" : "no pose", g_caret);
             }
-            SKSE::log::info("[Quill]   caret's point on the page ({:.3f}, {:.3f}, {:.3f}), slot {}", g_anchor.x, g_anchor.y, g_anchor.z,
+            SKSE::log::debug("[Quill]   caret's point on the page ({:.3f}, {:.3f}, {:.3f}), slot {}", g_anchor.x, g_anchor.y, g_anchor.z,
                             g_slot);
             // Where the scene camera puts them on screen (0-1), to compare with a screenshot.
             auto* camera = Camera();
@@ -486,7 +403,7 @@ namespace InkAndQuill::QuillCursor {
                 return std::format("({:.4f}, {:.4f})", x, y);
             };
             const auto& w = page->world;
-            SKSE::log::info("[Quill]   on screen: caret {} nib {}; page corners uv00 {} uv10 {} uv01 {} uv11 {}", screen(w * g_anchor),
+            SKSE::log::debug("[Quill]   on screen: caret {} nib {}; page corners uv00 {} uv10 {} uv01 {} uv11 {}", screen(w * g_anchor),
                             screen(g_quill->world * g_nib), screen(w * g_quad.p00), screen(w * g_quad.p10), screen(w * g_quad.p01),
                             screen(w * g_quad.p11));
         }
@@ -502,7 +419,6 @@ namespace InkAndQuill::QuillCursor {
             view.hover = g_size * view.scale;
             view.rotate = camera->world.rotate.Transpose();  // the model's own axes in the world
             g_view = view;
-            g_legacy.reset();
         }
 
     }
@@ -510,7 +426,7 @@ namespace InkAndQuill::QuillCursor {
     void Show()
     {
         Hide();
-        if (!Settings::QuillAdjust()) return;  // deferred past 1.0: development only (docs/EDITOR.md#quill-cursor)
+        if (!Settings::QuillCursor() && !Settings::QuillAdjust()) return;
         auto* menu = Menu();
         if (!menu) return;
         auto& data = menu->GetRuntimeData();
@@ -522,6 +438,7 @@ namespace InkAndQuill::QuillCursor {
         }
         RE::NiPointer<RE::NiNode> model;
         const RE::BSModelDB::DBTraits::ArgsType args{};
+        // The quill's own model: a replacer's, or Model Swapper's variant, when one is installed.
         if (RE::BSModelDB::Demand(item->GetModel(), model, args) != RE::BSResource::ErrorCode::kNone || !model) {
             SKSE::log::warn("[Quill] Can't load {}", item->GetModel());
             return;
@@ -532,6 +449,7 @@ namespace InkAndQuill::QuillCursor {
         if (!quill) return;
         quill->GetFlags().set(RE::NiAVObject::Flag::kHidden);  // until it's in place (Apply)
         DropCollision(quill);
+        BlendCutouts(quill);
         quill->local = {};
         RE::NiUpdateData update{};
         quill->Update(update);  // its own size, before it's on the book
@@ -541,21 +459,24 @@ namespace InkAndQuill::QuillCursor {
         g_parent.reset(book);
         g_quill.reset(quill);
         g_placed = false;
+        // The quill is the caret: none from the start, so it doesn't blink before the quill is in place.  Adjust mode
+        // keeps the real one, to line the nib up against.
+        if (!Settings::QuillAdjust()) g_caretHidden = Book::Call("EditHideCaret", nullptr, "1");
         g_still = 0;
         g_model = data.isNote ? "Note" : "Book";
         g_quad = ReadQuad(data.pageTextGeo.get());
         QuillPaper::Read(book);
         g_visible = data.book ? data.book->GetVisibleFrameRect() : RE::GRectF{};
-        SKSE::log::info("[Quill] Visible stage ({}, {}) to ({}, {}); quad {}, UVs u {:.3f}-{:.3f} v {:.3f}-{:.3f}", g_visible.left,
+        SKSE::log::debug("[Quill] Visible stage ({}, {}) to ({}, {}); quad {}, UVs u {:.3f}-{:.3f} v {:.3f}-{:.3f}", g_visible.left,
                         g_visible.top, g_visible.right, g_visible.bottom, g_quad.valid ? "read" : "not read", g_quad.u0, g_quad.u1,
                         g_quad.v0, g_quad.v1);
-        if (!LoadPose()) ResetView();
+        LoadPose();
         Apply();
         Log("book", book);
         Log("page", data.pageTextGeo.get());
         const auto inBook = book->world.Invert() * data.pageTextGeo->world;
         const auto& r = inBook.rotate.entry;
-        SKSE::log::info("[Quill] page in the book: ({:.4f}, {:.4f}, {:.4f}) x{:.4f} rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}]",
+        SKSE::log::debug("[Quill] page in the book: ({:.4f}, {:.4f}, {:.4f}) x{:.4f} rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}]",
                         inBook.translate.x, inBook.translate.y, inBook.translate.z, inBook.scale, r[0][0], r[0][1], r[0][2], r[1][0],
                         r[1][1], r[1][2], r[2][0], r[2][1], r[2][2]);
         LogPose(std::format("on '{}' (note {}):", book->name.c_str(), data.isNote));
@@ -563,7 +484,7 @@ namespace InkAndQuill::QuillCursor {
             const auto& w = camera->world;
             const auto& f = camera->GetRuntimeData2().viewFrustum;
             const auto onPage = data.pageTextGeo->world.Invert() * w.translate;
-            SKSE::log::info("[Quill] camera '{}': world ({:.2f}, {:.2f}, {:.2f}) rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} "
+            SKSE::log::debug("[Quill] camera '{}': world ({:.2f}, {:.2f}, {:.2f}) rot [{:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} {:.4f}; {:.4f} {:.4f} "
                             "{:.4f}]; frustum l {:.4f} r {:.4f} t {:.4f} b {:.4f} near {:.2f} far {:.2f} ortho {}; on the page ({:.2f}, "
                             "{:.2f}, {:.2f})",
                             camera->name.c_str(), w.translate.x, w.translate.y, w.translate.z, w.rotate.entry[0][0], w.rotate.entry[0][1],
@@ -580,6 +501,8 @@ namespace InkAndQuill::QuillCursor {
     void Hide()
     {
         if (g_parent && g_quill) g_parent->DetachChild(g_quill.get());
+        g_placed = false;
+        if (std::exchange(g_caretHidden, false)) Book::Call("EditHideCaret", nullptr, "0");
         g_quill.reset();
         g_parent.reset();
         QuillPaper::Clear();
@@ -592,7 +515,6 @@ namespace InkAndQuill::QuillCursor {
         using namespace Keys;
         // Numpad, against the screen: 4/6 across, 2/8 up and down, 7/9 toward the camera and away; "/" switches moving
         // and turning (about the same axes in the world: x across, y toward the camera, z up).
-        if (!g_view) ConvertLegacy();
         if (!g_view) ResetView();
         if (!g_view) return true;
         auto& view = *g_view;
@@ -623,12 +545,8 @@ namespace InkAndQuill::QuillCursor {
             RE::SendHUDMessage::ShowHUDMessage(std::format("Quill pose saved for {}", g_model).c_str());
             return true;
         case kNumpadDot:
-            if (!LoadPose()) {
-                SKSE::log::info("[Quill] No saved pose for {}", g_model);
-                RE::SendHUDMessage::ShowHUDMessage(std::format("No quill pose saved for {}", g_model).c_str());
-                return true;
-            }
-            RE::SendHUDMessage::ShowHUDMessage(std::format("Quill pose restored for {}", g_model).c_str());
+            RE::SendHUDMessage::ShowHUDMessage(LoadPose() ? std::format("Quill pose restored for {}", g_model).c_str()
+                                                          : "No quill pose saved: the built-in one");
             break;
         case kNumpad5:
             LogPose(std::format("sample {}:", ++g_samples));
@@ -652,7 +570,7 @@ namespace InkAndQuill::QuillCursor {
             }
         }
         Apply();
-        LogPose("adjusted:");
+        LogPose("adjusted:", false);
         Log("quill", g_quill.get());
         Log("book", g_parent.get());
         return true;

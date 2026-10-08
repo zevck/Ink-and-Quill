@@ -37,9 +37,12 @@ namespace InkAndQuill::Settings {
     inline constexpr Setting kBloodCost{ "Writing", "BloodCost", 10, 1, 100 };      // % of maximum health per save
     inline constexpr Setting kBlood{ "Writing", "Blood", 1, 0, 1 };                 // offered when there's no ink
     inline constexpr Setting kRequireQuillAndInk{ "Writing", "RequireQuillAndInk", 1, 0, 1 };  // 0: writing is free
-    inline constexpr Setting kQuillAdjust{ "Debug", "QuillAdjust", 0, 0, 1 };  // development only: the quill cursor, deferred (QuillCursor.h)
+    inline constexpr Setting kQuillCursor{ "Writing", "QuillCursor", 1, 0, 1 };  // the game's quill at the caret, in place of it
+    inline constexpr Setting kQuillAdjust{ "Debug", "QuillAdjust", 0, 0, 1 };    // the numpad poses the quill (QuillCursor.h)
+    inline constexpr Setting kDebugLog{ "Debug", "Logging", 0, 0, 1 };           // the log at debug level, not info
 
-    inline constexpr const Setting* kAll[] = { &kEditKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kQuillAdjust };
+    inline constexpr const Setting* kAll[] = { &kEditKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kQuillCursor, &kQuillAdjust,
+                                               &kDebugLog };
 
     void Load();
 
@@ -56,6 +59,7 @@ namespace InkAndQuill::Settings {
     void Set(const Setting& setting, int value);
 
     inline std::uint32_t EditKey() { return static_cast<std::uint32_t>(Get(kEditKey)); }
+    inline bool QuillCursor() { return Get(kQuillCursor) != 0; }
     inline bool QuillAdjust() { return Get(kQuillAdjust) != 0; }
 
 }

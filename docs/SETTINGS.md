@@ -4,7 +4,7 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 
 ## The INI
 
-`SKSE\Plugins\InkAndQuill.ini`. Every setting is an integer row in `Settings::kAll` (`[Materials]` aside: lists read by `WritingTools`, also from other mods' own files, [below](#other-mods-quills-and-inkwells)) (section, key, default, range), read at `kDataLoaded` and clamped. A missing file or key is its default; nothing ships an INI. The MCM changes a setting through `SetSetting`, which writes that one key back at once (`WritePrivateProfileStringA`, so the rest of the file is kept) and takes effect immediately: every reader asks `Settings::Get` when it needs the value.
+`SKSE\Plugins\InkAndQuill.ini`. Every setting is an integer row in `Settings::kAll` (`[Materials]` aside: lists read by `WritingTools`, also from other mods' own files, [below](#other-mods-quills-and-inkwells)) (section, key, default, range), read at `kDataLoaded` and clamped. A missing file or key is its default; nothing ships an INI. Besides the settings, the INI holds a quill pose saved in adjust mode (`[QuillPose]`, [EDITOR.md](EDITOR.md#quill-cursor)). The MCM changes a setting through `SetSetting`, which writes that one key back at once (`WritePrivateProfileStringA`, so the rest of the file is kept) and takes effect immediately: every reader asks `Settings::Get` when it needs the value.
 
 | Setting | Default | Range | What |
 |---|---|---|---|
@@ -13,7 +13,9 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 | `Writing.InkwellUses` | 10 | 0–100 | Saves a full inkwell lasts; 0: inkwells never run dry (none is used or renamed; the MCM shows "Infinite") |
 | `Writing.Blood` | 1 | 0–1 | With a quill but no ink, offer to write in blood. 0: the `NeedsInk` notice instead (a HUD notice on a blank) |
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
-| `Debug.QuillAdjust` | 0 | 0–1 | Development only, not in the MCM: shows the quill cursor (deferred past 1.0) and lets the numpad move it ([EDITOR.md](EDITOR.md#quill-cursor)) |
+| `Writing.QuillCursor` | 1 | 0–1 | While writing, the game's quill sits at the caret, in place of the blinking caret. 0: the plain caret ([EDITOR.md](EDITOR.md#quill-cursor)) |
+| `Debug.QuillAdjust` | 0 | 0–1 | MCM "Quill adjust mode": shows the quill whatever `Writing.QuillCursor` says, keeps the real caret beside it, and lets the numpad pose it ([EDITOR.md](EDITOR.md#quill-cursor)) |
+| `Debug.Logging` | 0 | 0–1 | MCM "Debug logging": `InkAndQuill.log` at debug level (the quill's per-frame lines: the page's vertices and sheets, the camera, where things land on screen), set at once and at load |
 
 The key is a DirectX scan code, not one that types (while writing it couldn't also type). The MCM refuses, with a message, a code that isn't a keyboard key (SkyUI also offers mouse and gamepad buttons, 256 and up) or a key that types or edits (`GetKeyProblem`, i.e. `Keys::Check`, also used for clients' keys: Escape, Backspace, Enter, Delete, the arrows, Home, End, the modifiers, and anything that gives a character with the player's layout). It doesn't check conflicts: it only acts while a book is open, where game controls don't apply. Clients' own keys (Physical Diaries' new entry and tear-out) are theirs, in their own settings.
 

@@ -52,6 +52,8 @@ class BookMenu extends MovieClip
    var EditField;        // The TextField inside EditClip: the whole text, tall enough never to scroll
    var EditMask;         // shows one page of EditField
    var iSuppressTurnUntil;   // getTimer() before which engine page turns are refused (key presses)
+   var bHideCaret;       // the quill shows the caret: the field can't be typed in (it draws no caret), iCaretPos is it
+   var iCaretPos;
    var iEditShownFrom;   // books: offset of the engine's current spread in its 4 page slots (0 or 2)
    var aSegs;            // the text as segments: {locked, body, editable} lengths, in order (see EditBuildMarked)
    var oContentFmt;      // entry text's format (config font, content size)
@@ -138,6 +140,7 @@ class BookMenu extends MovieClip
    {
       this.bEditMode = true;
       this.bBlood = false;
+      this.bHideCaret = false;
       // The page being read (at the book's opening: page 0). A book's spread is in engine
       // slots 0-1 or 2-3 (see iEditShownFrom); editing starts on the same page and slots.
       var readPage = this.iLeftPageNumber;
@@ -1031,7 +1034,7 @@ class BookMenu extends MovieClip
 
    function EditCaretLine()
    {
-      var pos = Selection.getBeginIndex();
+      var pos = this.EditCaret();
       var tf = this.EditField;
       if(pos < 0 || pos >= tf.length)
       {
@@ -1270,14 +1273,47 @@ class BookMenu extends MovieClip
       s._y = tf._y + top - 2;
    }
 
+   // From the plugin: "1" while the quill shows where the caret is, "0" when it's gone.  Unfocusing alone still draws the
+   // caret: a field that can't be typed in draws none, so the caret's place is kept here meanwhile.
+   function EditHideCaret(on)
+   {
+      var hide = on == "1";
+      if(this.EditField == undefined || hide == (this.bHideCaret == true))
+      {
+         return undefined;
+      }
+      if(hide)
+      {
+         this.iCaretPos = this.EditCaret();
+         this.bHideCaret = true;
+         Selection.setFocus(null);
+         this.EditField.type = "dynamic";
+         this.EditField.selectable = false;
+      }
+      else
+      {
+         this.bHideCaret = false;
+         this.EditSetCaret(this.iCaretPos);
+      }
+   }
+
    function EditCaret()
    {
+      if(this.bHideCaret)
+      {
+         return Math.max(0, Math.min(this.iCaretPos, this.EditField.length));
+      }
       var pos = Selection.getBeginIndex();
       return pos < 0 ? this.EditField.length : pos;
    }
 
    function EditSetCaret(pos)
    {
+      if(this.bHideCaret)
+      {
+         this.iCaretPos = pos;
+         return undefined;
+      }
       this.EditField.type = "input";
       this.EditField.selectable = true;
       Selection.setFocus(this.EditField);

@@ -42,6 +42,14 @@ namespace InkAndQuill::Settings {
 
     std::string IniPath() { return Path(); }
 
+    namespace {
+        // Debug.Logging: the log's level, at once.
+        void ApplyLogLevel()
+        {
+            if (auto log = spdlog::default_logger()) log->set_level(Get(kDebugLog) ? spdlog::level::debug : spdlog::level::info);
+        }
+    }
+
     void Load()
     {
         const auto path = Path();
@@ -52,6 +60,7 @@ namespace InkAndQuill::Settings {
         SKSE::log::info("[Settings] Edit key 0x{:X}, inkwell uses {}, blood {} ({}%), quill and ink {}",
                         EditKey(), Get(kInkwellUses), Get(kBlood) ? "on" : "off", Get(kBloodCost),
                         Get(kRequireQuillAndInk) ? "required" : "not required");
+        ApplyLogLevel();
     }
 
     const Setting* Find(std::string_view name)
@@ -72,6 +81,7 @@ namespace InkAndQuill::Settings {
             SKSE::log::error("[Settings] Couldn't write {}.{} to {}", setting.section, setting.key, kPath);
         }
         SKSE::log::info("[Settings] {}.{} = {}", setting.section, setting.key, value);
+        if (&setting == &kDebugLog) ApplyLogLevel();
     }
 
 }
