@@ -7,7 +7,7 @@
 
 <div align="center"><h2>🪶 Mods Using Ink & Quill 🪶</h2></div>
 
-<div align="center"><a href="https://github.com/zevck/SkyrimNet-Physical-Diaries">Physical Diaries</a> - Physical Letters</div>
+<div align="center"><a href="https://github.com/zevck/SkyrimNet-Physical-Diaries">Physical Diaries</a> - <a href="https://github.com/zevck/Physical-Letters">Physical Letters</a></div>
 
 ## 📋 Requirements
 > [!NOTE]
