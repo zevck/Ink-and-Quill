@@ -4,6 +4,100 @@ How a client mod uses Ink & Quill's editor. Header: [`api/InkAndQuillAPI.h`](../
 
 **Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries and Physical Letters use it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 
+## Quick start
+
+A complete minimal client: a notebook the player can write in. The book is a `BOOK` record in your own plugin (here `0x800` in `MyNotebook.esp`); the player opens it, presses the edit key (F3 by default), writes, and presses it again to save. Copy [`api/InkAndQuillAPI.h`](../api/InkAndQuillAPI.h) into your project, then:
+
+```cpp
+#include "InkAndQuillAPI.h"
+
+#include <Windows.h>  // GetModuleHandleA, GetProcAddress
+
+namespace {
+    const IQ_API* g_iq = nullptr;
+    RE::FormID g_notebook = 0;
+    std::string g_text;  // what the player wrote: plain text, '\n' line breaks
+
+    // Ink & Quill's lock markers (U+E002, U+E003): the player can't edit what's between them.
+    constexpr std::string_view kLockOpen = "\xEE\x80\x82";
+    constexpr std::string_view kLockClose = "\xEE\x80\x83";
+    constexpr std::string_view kTitle = "<font size='30'>My Notebook</font>\n\n";
+
+    // The player's text as book HTML: <, > and & escaped, Ink & Quill's own markers (U+E000 to U+E003) dropped.
+    std::string Render(std::string_view text)
+    {
+        std::string out;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (i + 2 < text.size() && text.substr(i, 2) == "\xEE\x80" && static_cast<unsigned char>(text[i + 2]) <= 0x83) {
+                i += 2;
+                continue;
+            }
+            switch (text[i]) {
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '&': out += "&amp;"; break;
+            default: out += text[i];
+            }
+        }
+        return out;
+    }
+
+    // How the book reads.
+    std::string Reading() { return std::string(kTitle) + Render(g_text); }
+
+    // The same, for the editor: the title locked, then one run (the player's text), closed by an empty lock so the
+    // run exists even while it's empty.
+    std::string Marked()
+    {
+        return std::string(kLockOpen) + std::string(kTitle) + std::string(kLockClose) + Render(g_text) + std::string(kLockOpen) +
+               std::string(kLockClose);
+    }
+
+    // The player saved: runs[0] is the text they wrote.  Accept it and give the book its new reading text.
+    void OnSave(void*, const char* const* runs, int32_t count, IQ_SaveReply* reply)
+    {
+        g_text = count > 0 ? runs[0] : "";
+        g_iq->ReplySave(reply, true, "", Reading().c_str());
+    }
+
+    // The edit key was pressed in an open book: start writing if it's ours.
+    bool Owner(void*, uint32_t bookFormId)
+    {
+        if (bookFormId != g_notebook) return false;  // not ours: Ink & Quill asks the next mod
+        const std::string marked = Marked();
+        IQ_Session session{};
+        session.size = sizeof(session);
+        session.markedText = marked.c_str();  // copied by Ink & Quill
+        session.caretRun = 0;                 // the caret starts at the end of run 0
+        session.onSave = OnSave;
+        g_iq->BeginSession(&session);
+        return true;
+    }
+
+    void OnMessage(SKSE::MessagingInterface::Message* message)
+    {
+        if (message->type == SKSE::MessagingInterface::kPostLoad) {
+            if (auto* module = GetModuleHandleA("InkAndQuill.dll")) {
+                if (auto get = reinterpret_cast<IQ_GetAPI_t>(GetProcAddress(module, "IQ_GetAPI"))) g_iq = get(IQ_API_VERSION);
+            }
+        } else if (message->type == SKSE::MessagingInterface::kDataLoaded && g_iq && g_iq->IsWritingOn()) {
+            if (auto* book = RE::TESDataHandler::GetSingleton()->LookupForm<RE::TESObjectBOOK>(0x800, "MyNotebook.esp")) {
+                g_notebook = book->GetFormID();
+                g_iq->SetClientName("My Notebook");  // how Ink & Quill's MCM lists your mod
+                g_iq->AddOwner(Owner, nullptr);
+            }
+        }
+    }
+}
+```
+
+Register `OnMessage` with SKSE's messaging interface in your plugin's load function, as usual. Two things stay your mod's job:
+
+- **Storing the text.** `g_text` above lives in memory only. Keep it in your SKSE co-save (or your own storage) so it survives saving and loading.
+- **Showing it when the book is read.** Ink & Quill shows the reading text you return from a save, but when the book is opened again it shows the book's own text. Give it yours: Physical Diaries and Physical Letters hook `TESDescription::GetDescription` for their books and return their reading text.
+
+From there, the sections below cover the rest: several runs in one book (a journal's entries), writing in blood (red text arrives between U+E000 and U+E001; `Render` above just drops the markers), blank items that become a book on the first save, your own keys while writing, and inline suggestions. For pages to break the same way when reading as in the editor, put your line breaks inside your font tags ([Starting](#starting)), and give blank lines a `&nbsp;` in the reading text: the game can't end a page at a line with nothing on it, so without one the pages break differently.
+
 ## Getting it
 
 At `kPostLoad` or later:
