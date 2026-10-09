@@ -25,7 +25,7 @@
 Alternatively, any other model or texture replacer is recommended to be used for the vanilla quill.
 
 ## 🔑 License
-**Ink & Quill** is released under the GNU General Public License v3.0 or later (GPL-3.0-or-later) as required by [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG). See LICENSE.md for the full text.
+**Ink & Quill** is released under the GNU General Public License v3.0 or later (GPL-3.0-or-later) as required by [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG). See [LICENSE](LICENSE) for the full text.
 
 ### Client API Exception
 As an additional permission under GPLv3 section 7, you may copy, include, compile against, dynamically load, link to, and communicate with Ink & Quill through the public C API declared in `api/InkAndQuillAPI.h`, and you may distribute such client mods under terms of your choice.
