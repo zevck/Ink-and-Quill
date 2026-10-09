@@ -26,6 +26,10 @@ namespace InkAndQuill::WritingTools {
     // kDataLoaded: finds the ESP's quill and inkwell lists.
     void OnDataLoaded();
 
+    // kDataLoaded, writing on: every general-goods merchant's chest gets the ESP's quill-and-inkwell list as its own
+    // entry, in memory, so every restock has them and no record is overridden.
+    void AddToMerchants();
+
     // The player carries a quill.
     bool HasQuill();
 

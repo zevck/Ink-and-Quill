@@ -1,0 +1,14 @@
+FormKey: 000806:InkAndQuill.esp
+EditorID: InkAndQuillLItemWritingSupplies
+Flags:
+- CalculateFromAllLevelsLessThanOrEqualPlayer
+- UseAll
+Entries:
+- Data:
+    Level: 1
+    Reference: 04C3C8:Skyrim.esm
+    Count: 1
+- Data:
+    Level: 1
+    Reference: 04C3C6:Skyrim.esm
+    Count: 1

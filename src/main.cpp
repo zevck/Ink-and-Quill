@@ -43,6 +43,7 @@ namespace {
             InkAndQuill::WritingTools::OnDataLoaded();
             if (InkAndQuill::WritingMode::IsOn()) {
                 InkAndQuill::Editor::Register();
+                InkAndQuill::WritingTools::AddToMerchants();
             }
             break;
         case SKSE::MessagingInterface::kPreLoadGame:

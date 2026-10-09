@@ -46,6 +46,9 @@ namespace InkAndQuill::WritingTools {
         constexpr std::string_view kPlugin = "InkAndQuill.esp";
         constexpr RE::FormID kQuillsList = 0x800;    // InkAndQuillQuills
         constexpr RE::FormID kInkwellsList = 0x801;  // InkAndQuillInkwells
+        constexpr RE::FormID kSupplies = 0x806;      // InkAndQuillLItemWritingSupplies: a quill and an inkwell
+        // Skyrim.esm LItemMiscVendorMiscItems75: the general-goods merchants' misc stock (how a general store is told).
+        constexpr RE::FormID kVendorMiscItems = 0x09AF0A;
 
         RE::BGSListForm* g_quills = nullptr;
         RE::BGSListForm* g_inkwells = nullptr;
@@ -258,6 +261,58 @@ namespace InkAndQuill::WritingTools {
         SKSE::log::info("[WritingTools] Other quills: {}, other inkwells: {}", g_extraQuills.size(), g_extraInkwells.size());
         static MenuSink menuSink;
         if (auto* ui = RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&menuSink);
+    }
+
+    namespace {
+        // Vanilla's generic world containers (hundreds in houses) stock the misc list too: a merchant using one would
+        // put a quill and an inkwell in all of them.  Same walk as Physical Letters' src/Parchment.cpp: fix both.
+        bool IsGenericContainer(const RE::TESObjectCONT* chest)
+        {
+            static constexpr std::pair<RE::FormID, std::string_view> kGeneric[] = { { 0x024CA4, "Skyrim.esm" }, { 0x09AF19, "Skyrim.esm" },
+                                                                                   { 0x03C361, "Dragonborn.esm" } };
+            auto* data = RE::TESDataHandler::GetSingleton();
+            for (const auto& [id, plugin] : kGeneric) {
+                if (data && data->LookupForm(id, plugin) == chest) return true;  // Cupboard01, PersonalChestSmall(_NoRespawn)
+            }
+            return false;
+        }
+
+        // Every general-goods merchant's chest (a vendor faction's, stocking vanilla's misc list) gets `ours` as its own entry,
+        // in memory: every restock has it, and no record is overridden.
+        void Stock(RE::TESLevItem* ours, RE::TESLevItem* generalGoods)
+        {
+            auto* data = RE::TESDataHandler::GetSingleton();
+            int stocked = 0;
+            for (auto* faction : data->GetFormArray<RE::TESFaction>()) {
+                if (!faction || !faction->IsVendor() || !faction->vendorData.merchantContainer) continue;
+                auto* base = faction->vendorData.merchantContainer->GetBaseObject();
+                auto* chest = base ? base->As<RE::TESObjectCONT>() : nullptr;
+                // Not a general store, or already stocked (several merchants can share a chest).
+                if (!chest || chest->GetObjectCount(generalGoods) == 0 || chest->GetObjectCount(ours) > 0) continue;
+                if (IsGenericContainer(chest)) {
+                    SKSE::log::warn("[WritingTools] Vendor faction {:08X}'s chest is a generic world container ({:08X}): not stocked there",
+                                    faction->GetFormID(), chest->GetFormID());
+                    continue;
+                }
+                if (!chest->AddObjectToContainer(ours, 1, nullptr)) continue;
+                ++stocked;
+                SKSE::log::info("[WritingTools] Stocked chest {:08X} '{}' (vendor faction {:08X})", chest->GetFormID(),
+                                chest->GetFormEditorID() ? chest->GetFormEditorID() : "", faction->GetFormID());
+            }
+            SKSE::log::info("[WritingTools] Quills and ink always stocked by {} general-goods merchant chest(s)", stocked);
+        }
+    }
+
+    void AddToMerchants()
+    {
+        auto* data = RE::TESDataHandler::GetSingleton();
+        auto* ours = data ? data->LookupForm<RE::TESLevItem>(kSupplies, kPlugin) : nullptr;
+        auto* generalGoods = RE::TESForm::LookupByID<RE::TESLevItem>(kVendorMiscItems);
+        if (!ours || !generalGoods) {
+            SKSE::log::warn("[WritingTools] {}: merchants won't sell quills and ink", !ours ? "No supplies list" : "No vendor list");
+            return;
+        }
+        Stock(ours, generalGoods);
     }
 
     bool HasQuill() { return CarriesAny(RE::PlayerCharacter::GetSingleton(), IsQuill); }
