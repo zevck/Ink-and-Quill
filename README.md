@@ -3,8 +3,6 @@
 > [!IMPORTANT]
 > **Ink & Quill** is still early in development. If you are interested in using it for one of your mods, please reach out to me first. Anyone is welcome to use it, but breaking changes may be made until version 1.0 is released.
 
-**For mod authors:** [docs/API.md](docs/API.md) shows how to use **Ink & Quill** in your mod, starting with a complete example.
-
 <div align="center"><h2>🪶 Mods Using Ink & Quill 🪶</h2></div>
 
 <div align="center"><a href="https://github.com/zevck/SkyrimNet-Physical-Diaries">Physical Diaries</a> - <a href="https://github.com/zevck/Physical-Letters">Physical Letters</a></div>
