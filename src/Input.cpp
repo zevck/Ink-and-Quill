@@ -22,6 +22,7 @@
 #include "Bookmarks.h"
 #include "Editor.h"
 #include "Keys.h"
+#include "QuillCursor.h"
 #include "Settings.h"
 
 namespace InkAndQuill::Input {
@@ -89,6 +90,7 @@ namespace InkAndQuill::Input {
                     if (button->IsDown()) Editor::OnEditKey(writing);
                     continue;
                 }
+                QuillCursor::KeyEvent(code, button->IsPressed());
                 if (IsClientKey(code) || IsModifier(code)) continue;
                 if (Keys::ShouldRepeat(button, code)) Editor::OnKey(code);
             }

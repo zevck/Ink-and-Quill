@@ -19,11 +19,16 @@
 
 #pragma once
 
-// The quill's scratch on the paper while writing (Writing.Sound).  See docs/EDITOR.md#the-writing-sound.
+// The quill's sounds on the paper while writing (their volume: Settings > Audio, Writing).  See
+// docs/EDITOR.md#the-writing-sound.
 namespace InkAndQuill::WritingSound {
 
-    // Text was typed: one scratch (the ESP's sound picks one of its clips), the one still sounding fading out; none
-    // within 150 ms of the last one's start.
-    void Play();
+    // Text was typed (not only spaces and line breaks): a scratch (none within 150 ms of the last sound), or a lone
+    // punctuation mark's own taps and strokes, which always sound.  UI thread.
+    void Play(std::string_view text);
+
+    // Every frame of the book menu: plays a mark's later sounds as they come due.  Clear: the book closed, drop them.
+    void Tick();
+    void Clear();
 
 }

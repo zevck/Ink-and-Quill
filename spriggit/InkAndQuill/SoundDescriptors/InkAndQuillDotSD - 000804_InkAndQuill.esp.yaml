@@ -1,0 +1,11 @@
+FormKey: 000804:InkAndQuill.esp
+EditorID: InkAndQuillDotSD
+Type: Standard
+Category: 000805:InkAndQuill.esp
+SoundFiles:
+- Data\Sound\FX\InkAndQuill\Dot.wav
+OutputModel: 0B75FB:Skyrim.esm
+LoopAndRumble:
+  Unknown: 2
+Priority: 128
+StaticAttenuation: 2

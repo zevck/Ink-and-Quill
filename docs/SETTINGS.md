@@ -15,7 +15,6 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 | `Writing.Blood` | 1 | 0–1 | With a quill but no ink, offer to write in blood. 0: the `NeedsInk` notice instead (a HUD notice on a blank) |
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
 | `Writing.QuillCursor` | 1 | 0–1 | While writing, the game's quill sits at the caret, in place of the blinking caret. 0: the plain caret ([EDITOR.md](EDITOR.md#quill-cursor)) |
-| `Writing.Sound` | 1 | 0–1 | While writing, a quill scratch for each typed key ([EDITOR.md](EDITOR.md#the-writing-sound)) |
 | `Debug.QuillAdjust` | 0 | 0–1 | MCM "Quill adjust mode": shows the quill whatever `Writing.QuillCursor` says, keeps the real caret beside it, and lets the numpad pose it ([EDITOR.md](EDITOR.md#quill-cursor)) |
 | `Debug.Logging` | 0 | 0–1 | MCM "Debug logging": `InkAndQuill.log` at debug level, written to disk line by line: adds the quill's details each time a book opens (the page's vertices and sheets, the camera) and, in adjust mode, where the caret, nib and page corners land on screen. Takes effect as soon as it's changed |
 
@@ -41,7 +40,7 @@ Inkwells = 0x000801~ScribesInk.esl
 
 ## The MCM
 
-One page. Left: the edit key and the bookmark list key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost, quill at the cursor, writing sound). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off; the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
+One page. Left: the edit key and the bookmark list key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost, quill at the cursor; the writing sounds' volume is the game's Settings > Audio, **Writing**). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off; the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
 
 The natives (`InkAndQuill_MCM`, global): `GetSetting`, `SetSetting`, `GetSettingDefault`, `GetSettingMin`, `GetSettingMax` by `"Section.Key"` (any case; an unknown name reads 0, logged), `GetKeyProblem`, and `GetClientCount`, `GetClientName`.
 

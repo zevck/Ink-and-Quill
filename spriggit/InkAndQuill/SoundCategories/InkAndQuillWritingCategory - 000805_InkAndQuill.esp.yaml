@@ -1,0 +1,10 @@
+FormKey: 000805:InkAndQuill.esp
+EditorID: InkAndQuillWritingCategory
+Name:
+  TargetLanguage: English
+  Value: $IQ_WritingVolume
+Flags:
+- ShouldAppearOnMenu
+Parent: 0EB803:Skyrim.esm
+StaticVolumeMultiplier: 0.9
+DefaultMenuVolume: 1

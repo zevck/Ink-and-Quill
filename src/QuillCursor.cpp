@@ -114,6 +114,64 @@ namespace InkAndQuill::QuillCursor {
             return { kWiggleDegrees * std::sin(turn) * fade * std::numbers::pi_v<float> / 180.f, { kStroke.x * out, kStroke.y * out } };
         }
 
+        // Motion: it lowers onto the page when it appears and lifts away when it goes (a page turn, writing ended with the
+        // book open), and hops when the caret moves without writing (a click, a key tapped) rather than sliding there.
+        constexpr float kLift = 4.f;  // world units above its pose, coming and going (toward the camera: it grows) ...
+        constexpr float kLiftRise = 0.05f;  // ... and this much up the screen per unit (0.75 was 4 lines at full lift)
+        constexpr float kLandSeconds = 0.25f;
+        constexpr float kLeaveSeconds = 0.2f;
+        constexpr float kHopPerStage = 0.02f, kHopMin = 0.5f, kHopMax = 3.f;  // a hop's height (world) by distance (stage)
+        constexpr float kHopSecondsPerStage = 0.0006f, kHopSecondsMin = 0.1f, kHopSecondsMax = 0.3f;
+        constexpr float kTypedSeconds = 0.1f;  // the caret moving this soon after typing or erasing is the edit: no hop
+        constexpr float kHopThreshold = 0.5f;  // stage units: a smaller caret move isn't a hop
+        constexpr float kMaxFrameSeconds = 0.1f;  // a longer frame (a hitch) counts as this long for the carry
+        constexpr float kCarryHeight = 4.f;     // a navigation key held: carried this high (world) ...
+        constexpr float kCarrySeconds = 0.12f;  // ... reached, or set down, in this long
+        constexpr float kCarryFollow = 0.05f;   // seconds to close most of the way to the caret while carried
+
+        struct Hop
+        {
+            Clock::time_point began;
+            RE::NiPoint2 from, to;
+            float seconds = 0.f, height = 0.f;
+        };
+        struct Leave
+        {
+            Clock::time_point began;
+            RE::NiTransform world;
+            RE::NiPoint3 up;
+            bool detach = false;  // writing ended: off the book once it's away; a page turn: hidden, it lands again
+        };
+        std::optional<Clock::time_point> g_landed;  // when it began lowering onto the page
+        std::optional<Clock::time_point> g_lastEdit;  // the last key that typed, erased or spaced (Wrote, Edited)
+        std::optional<Hop> g_hop;
+        std::optional<Leave> g_leave;
+        std::optional<RE::NiPoint2> g_shown;  // the caret point it's drawn at (behind the caret while it hops)
+        RE::NiTransform g_lastWorld;          // last frame's place, and the way up from the page there
+        RE::NiPoint3 g_lastUp;
+        float g_carry = 0.f;  // 0 down, 1 carried (a navigation key held)
+        bool g_carryMoved = false;  // the caret moved during this hold: a key that can't move it doesn't lift the quill
+        std::optional<RE::NiPoint2> g_lastTarget;  // last frame's caret point
+        std::optional<Clock::time_point> g_lastFrame;
+
+        // Keys that carry it while held (moving the caret without writing), by the editor's own key events (KeyEvent, on
+        // the input thread): a bit each.  Not Windows' key state: with NumLock off the numpad reads as arrows there.
+        constexpr std::uint32_t kCarryKeys[] = { Keys::kLeft, Keys::kRight, Keys::kUp,    Keys::kDown,
+                                                 Keys::kHome, Keys::kEnd,   Keys::kEnter, Keys::kKeypadEnter };
+        std::atomic<std::uint32_t> g_held{ 0 };
+
+        float Seconds(Clock::time_point since) { return std::chrono::duration<float>(Clock::now() - since).count(); }
+
+        float Smooth(float t)
+        {
+            t = std::clamp(t, 0.f, 1.f);
+            return t * t * (3.f - 2.f * t);
+        }
+
+        float Distance(RE::NiPoint2 a, RE::NiPoint2 b) { return std::hypot(a.x - b.x, a.y - b.y); }
+
+        bool NavigationHeld() { return g_held.load(std::memory_order_relaxed) != 0; }
+
         // Adjust mode (Settings::kQuillAdjust): the numpad moves or turns the quill.
         bool g_turning = false;
         int g_step = 1;
@@ -354,8 +412,8 @@ namespace InkAndQuill::QuillCursor {
         bool Perspective(RE::NiCamera* camera) { return camera && !camera->GetRuntimeData2().viewFrustum.bOrtho; }
 
         // The quill in the world for a View: the nib `hover` above the spot beside the caret's (moved by `shift` on the
-        // stage), toward the camera.
-        std::optional<RE::NiTransform> ViewWorld(const View& view, RE::NiPoint2 shift = {})
+        // stage), toward the camera, and `lift` more, partly up the screen (`rise`: the way it lifts, per unit).
+        std::optional<RE::NiTransform> ViewWorld(const View& view, RE::NiPoint2 shift, float lift, RE::NiPoint3& rise)
         {
             auto* page = Page();
             auto* camera = Camera();
@@ -370,7 +428,8 @@ namespace InkAndQuill::QuillCursor {
             RE::NiTransform world;
             world.rotate = camera->world.rotate * view.rotate;
             world.scale = view.scale;
-            world.translate = spotWorld + up * view.hover - world.rotate * (g_nib * view.scale);
+            rise = up + camera->world.rotate * RE::NiPoint3{ 0.f, kLiftRise, 0.f };  // a camera's up is +y
+            world.translate = spotWorld + up * view.hover + rise * lift - world.rotate * (g_nib * view.scale);
             return world;
         }
 
@@ -382,10 +441,126 @@ namespace InkAndQuill::QuillCursor {
             SKSE::log::info("[Quill] Not shown after {} frames ({}): the real caret instead until it is", kPlaceTimeout, why);
         }
 
+        // The quill at a world transform.
+        void Place(const RE::NiTransform& world)
+        {
+            const auto& t = world.translate;
+            if (!std::isfinite(t.x) || !std::isfinite(t.y) || !std::isfinite(t.z)) return;
+            g_quill->local = g_parent->world.Invert() * world;
+            RE::NiUpdateData update{ 0.f, RE::NiUpdateData::Flag::kDisableCollision };
+            g_quill->Update(update);
+            g_quill->world = g_parent->world * g_quill->local;
+            g_quill->UpdateDownwardPass(update, 0);
+        }
+
+        // Its motion on the page, ended (it isn't drawn there any more).
+        void ResetMotion()
+        {
+            g_placed = false;
+            g_landed.reset();
+            g_hop.reset();
+            g_shown.reset();
+            g_carry = 0.f;
+            g_carryMoved = false;
+            g_lastTarget.reset();
+            g_lastFrame.reset();
+        }
+
+        void HideNow()
+        {
+            if (g_parent && g_quill) g_parent->DetachChild(g_quill.get());
+            ResetMotion();
+            g_quill.reset();
+            g_parent.reset();
+            g_leave.reset();
+            QuillPaper::Clear();
+        }
+
+        // It lifts away from where it was last drawn (only if it was).
+        void StartLeave(bool detach)
+        {
+            if (!g_placed) {
+                if (detach) HideNow();
+                return;
+            }
+            ResetMotion();
+            g_leave = Leave{ Clock::now(), g_lastWorld, g_lastUp, detach };
+        }
+
+        void Leaving()
+        {
+            const float t = Seconds(g_leave->began) / kLeaveSeconds;
+            if (t >= 1.f) {
+                const bool detach = g_leave->detach;
+                g_leave.reset();
+                if (detach) HideNow();
+                else g_quill->GetFlags().set(RE::NiAVObject::Flag::kHidden);
+                return;
+            }
+            auto world = g_leave->world;
+            world.translate += g_leave->up * (kLift * Smooth(t));
+            Place(world);
+        }
+
+        // The caret point it's drawn at this frame, and how high it is there: a caret moved by writing is followed at once,
+        // with a carry key held it's carried along above the page, any other move is a hop from wherever it is.
+        RE::NiPoint2 Shown(RE::NiPoint2 target, float& height)
+        {
+            const auto now = Clock::now();
+            const float dt = g_lastFrame ? std::min(std::chrono::duration<float>(now - *g_lastFrame).count(), kMaxFrameSeconds) : 0.f;
+            g_lastFrame = now;
+            // Carried once the caret has moved during the hold, until the key is up (not between its repeats).
+            if (!NavigationHeld()) g_carryMoved = false;
+            else if (g_lastTarget && Distance(*g_lastTarget, target) > kHopThreshold) g_carryMoved = true;
+            g_lastTarget = target;
+            const bool held = NavigationHeld() && g_carryMoved;
+            g_carry = std::clamp(g_carry + (held ? dt : -dt) / kCarrySeconds, 0.f, 1.f);
+            const float carried = Smooth(g_carry) * kCarryHeight;
+            height = 0.f;
+            const auto along = [](const Hop& hop, float t) {
+                const float s = Smooth(t);
+                return RE::NiPoint2{ hop.from.x + (hop.to.x - hop.from.x) * s, hop.from.y + (hop.to.y - hop.from.y) * s };
+            };
+            const bool typing = g_lastEdit && Seconds(*g_lastEdit) < kTypedSeconds;
+            if (!g_shown || typing) {
+                g_hop.reset();
+                g_shown = target;
+                return target;
+            }
+            height = carried;
+            if (held) {
+                g_hop.reset();
+                const float k = 1.f - std::exp(-dt / kCarryFollow);
+                g_shown = RE::NiPoint2{ g_shown->x + (target.x - g_shown->x) * k, g_shown->y + (target.y - g_shown->y) * k };
+                return *g_shown;
+            }
+            if (Distance(g_hop ? g_hop->to : *g_shown, target) > kHopThreshold) {
+                const auto from = g_hop ? along(*g_hop, Seconds(g_hop->began) / g_hop->seconds) : *g_shown;
+                const float d = Distance(from, target);
+                g_hop = Hop{ Clock::now(), from, target, std::clamp(kHopSecondsMin + d * kHopSecondsPerStage, kHopSecondsMin, kHopSecondsMax),
+                             std::clamp(d * kHopPerStage, kHopMin, kHopMax) };
+            }
+            if (!g_hop) return *g_shown;
+            const float t = Seconds(g_hop->began) / g_hop->seconds;
+            if (t >= 1.f) {
+                g_shown = g_hop->to;
+                g_hop.reset();
+                return *g_shown;
+            }
+            g_shown = along(*g_hop, t);
+            height = std::max(carried, g_hop->height * std::sin(std::numbers::pi_v<float> * t));
+            return *g_shown;
+        }
+
         void Apply()
         {
+            if (!g_parent || !g_quill) return;
+            if (g_leave) {
+                Leaving();
+                return;
+            }
             auto* page = Page();
-            if (!g_parent || !g_quill || !page) return;
+            if (!page) return;
             FindAnchor(page);
             const bool still = (page->world.translate - g_lastPage).Length() < 1e-3f && (g_anchor - g_lastAnchor).Length() < 1e-3f;
             g_lastPage = page->world.translate;
@@ -396,13 +571,19 @@ namespace InkAndQuill::QuillCursor {
             const bool turned = g_stagePoint && (g_caretPage != g_lastCaretPage || g_slot != g_lastCaretSlot);
             if (g_stagePoint) g_lastCaretPage = g_caretPage, g_lastCaretSlot = g_slot;
             if (!g_stagePoint || turned) {
-                if (std::exchange(g_placed, false)) g_quill->GetFlags().set(RE::NiAVObject::Flag::kHidden);
-                if (!g_stagePoint) return;
+                StartLeave(false);
                 g_waited = 0;  // a turn's wait doesn't count toward the timeout
+                if (!g_stagePoint || g_leave) return;
             }
             if (!g_placed && ++g_waited == kPlaceTimeout) RestoreCaret();
             const auto wiggle = WiggleNow();
-            auto world = g_view ? ViewWorld(*g_view, wiggle.stroke) : std::nullopt;
+            float hop = 0.f;
+            const auto shown = g_placed ? Shown(*g_stagePoint, hop) : *g_stagePoint;
+            // Not shown yet: up where it lowers from.  Shown: lowering, then down (and up again for a hop).
+            const float lift = !g_placed ? kLift : g_landed ? kLift * (1.f - Smooth(Seconds(*g_landed) / kLandSeconds)) + hop : hop;
+            const RE::NiPoint2 shift{ shown.x - g_stagePoint->x + wiggle.stroke.x, shown.y - g_stagePoint->y + wiggle.stroke.y };
+            RE::NiPoint3 up;
+            auto world = g_view ? ViewWorld(*g_view, shift, lift, up) : std::nullopt;
             if (!world) return;
             // Writing: swayed about the nib (it stays on the text), around the line of sight.
             if (wiggle.angle != 0.f) {
@@ -414,15 +595,15 @@ namespace InkAndQuill::QuillCursor {
                     world->translate = nib - world->rotate * (g_nib * world->scale);
                 }
             }
-            const auto& t = world->translate;
-            if (!std::isfinite(t.x) || !std::isfinite(t.y) || !std::isfinite(t.z)) return;
-            g_quill->local = g_parent->world.Invert() * *world;
-            RE::NiUpdateData update{ 0.f, RE::NiUpdateData::Flag::kDisableCollision };
-            g_quill->Update(update);
-            g_quill->world = g_parent->world * g_quill->local;
-            g_quill->UpdateDownwardPass(update, 0);
+            Place(*world);
+            g_lastWorld = *world;
+            g_lastUp = up;
             // Shown once the book has stopped moving (until then it jumps: the book opening, the caret's point not yet found).
-            if (!g_placed && ((g_still >= kStillFrames && g_caretOnSheet) || g_still >= kStillAnyway)) g_placed = true;
+            if (!g_placed && ((g_still >= kStillFrames && g_caretOnSheet) || g_still >= kStillAnyway)) {
+                g_placed = true;
+                g_landed = Clock::now();
+                g_shown = *g_stagePoint;
+            }
             if (!g_placed) return;
             g_quill->GetFlags().reset(RE::NiAVObject::Flag::kHidden);
             if (!g_caretHidden && !Settings::QuillAdjust()) g_caretHidden = Book::Call("EditHideCaret", nullptr, "1");
@@ -474,6 +655,7 @@ namespace InkAndQuill::QuillCursor {
     void Show()
     {
         Hide();
+        g_held = 0;  // a key held from before writing: its release went to the game, not here
         if (!Settings::QuillCursor() && !Settings::QuillAdjust()) return;
         auto* menu = Menu();
         if (!menu) return;
@@ -554,16 +736,25 @@ namespace InkAndQuill::QuillCursor {
         // A fresh swing starts at rest; one still going keeps its phase, so typing on doesn't jerk it.
         if (!g_lastWrote || std::chrono::duration<float>(now - *g_lastWrote).count() > kWiggleEnd) g_wiggleBegan = now;
         g_lastWrote = now;
+        g_lastEdit = now;
     }
 
-    void Hide()
+    void Edited() { g_lastEdit = Clock::now(); }
+
+    void KeyEvent(std::uint32_t code, bool down)
     {
-        if (g_parent && g_quill) g_parent->DetachChild(g_quill.get());
-        g_placed = false;
+        for (std::uint32_t bit = 0; bit < std::size(kCarryKeys); ++bit) {
+            if (kCarryKeys[bit] != code) continue;
+            if (down) g_held.fetch_or(1u << bit, std::memory_order_relaxed);
+            else g_held.fetch_and(~(1u << bit), std::memory_order_relaxed);
+        }
+    }
+
+    void Hide(bool lift)
+    {
         if (std::exchange(g_caretHidden, false)) Book::Call("EditHideCaret", nullptr, "0");
-        g_quill.reset();
-        g_parent.reset();
-        QuillPaper::Clear();
+        if (lift && g_quill && !g_leave) StartLeave(true);
+        else HideNow();
     }
 
     bool Adjust(std::uint32_t scanCode)

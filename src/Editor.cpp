@@ -350,10 +350,11 @@ namespace InkAndQuill::Editor {
             }
         }
 
-        void LeaveEditMode(const char* why)
+        // `reading`: the book stays open (the edit key), so the quill lifts away rather than vanishing.
+        void LeaveEditMode(const char* why, bool reading = false)
         {
             if (!g_active.exchange(false)) return;
-            QuillCursor::Hide();
+            QuillCursor::Hide(reading);
             g_prompting = false;
             SetTextInput(false);
             SKSE::log::info("[Editor] Edit mode off: {}", why);
@@ -400,7 +401,7 @@ namespace InkAndQuill::Editor {
             if (result == SaveResult::Unreadable) Notify(Strings::Get("$IQ_SaveFailed"));
             if (result == SaveResult::Unreadable || result == SaveResult::Refused) return;
             auto* movie = BookMovie();
-            LeaveEditMode(result == SaveResult::Saved ? "saved (edit key)" : "nothing to save (edit key)");
+            LeaveEditMode(result == SaveResult::Saved ? "saved (edit key)" : "nothing to save (edit key)", true);
             // Saved without a reading text: the client closes the book.  Nothing saved: the SWF reads the text it had.
             if (result == SaveResult::Saved && text.empty()) {
                 SKSE::log::info("[Editor] No text to read again: closing the book");
@@ -599,6 +600,8 @@ namespace InkAndQuill::Editor {
                 if (a_event && a_event->menuName == RE::BookMenu::MENU_NAME && !a_event->opening) {
                     g_bookOpen = false;
                     Bookmarks::OnBookClosed();
+                    QuillCursor::Hide();  // one still lifting away after writing ended goes with the book
+                    WritingSound::Clear();
                     LeaveEditMode("the book menu closed");
                     // Only now: refreshing it under the open book menu broke the menu's navigation (Physical Diaries).
                     if (!g_touched.empty()) RefreshInventory(std::exchange(g_touched, {}));
@@ -616,6 +619,7 @@ namespace InkAndQuill::Editor {
             {
                 func(a_menu, a_interval, a_currentTime);
                 QuillCursor::Follow();
+                WritingSound::Tick();
                 const RE::FormID waiting = g_beginOnOpen ? g_beginOnOpen : g_blankOnOpen;
                 if (waiting == 0 || g_active) return;
                 auto* book = RE::BookMenu::GetTargetForm();
@@ -635,14 +639,18 @@ namespace InkAndQuill::Editor {
         };
 
         // Text typed at the caret (a key, Enter, a paste, a suggestion): the quill wiggles and scratches as it writes, but
-        // not for spaces and line breaks alone (nothing is inked).
+        // not for spaces and line breaks alone (nothing is inked); spaces it follows like an edit (Enter hops a line).
         void Type(const char* text)
         {
             Invoke("AppendEditChar", text);
             Changed();
-            if (std::string_view(text).find_first_not_of(" \t\r\n") == std::string_view::npos) return;
+            const std::string_view typed(text);
+            if (typed.find_first_not_of(" \t\r\n") == std::string_view::npos) {
+                if (typed.find_first_of("\r\n") == std::string_view::npos) QuillCursor::Edited();
+                return;
+            }
             QuillCursor::Wrote();
-            WritingSound::Play();
+            WritingSound::Play(text);
         }
 
         void HandleKey(std::uint32_t scanCode)
@@ -672,6 +680,7 @@ namespace InkAndQuill::Editor {
                 if (CanWrite(back ? Change::EraseBack : Change::EraseForward)) {
                     Invoke(back ? "EditBackspace" : "EditDelete");
                     Changed();
+                    QuillCursor::Edited();
                 }
                 return;
             }

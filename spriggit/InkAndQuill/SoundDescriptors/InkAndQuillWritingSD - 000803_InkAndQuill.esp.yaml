@@ -1,7 +1,7 @@
 FormKey: 000803:InkAndQuill.esp
 EditorID: InkAndQuillWritingSD
 Type: Standard
-Category: 0172A1:Skyrim.esm
+Category: 000805:InkAndQuill.esp
 SoundFiles:
 - Data\Sound\FX\InkAndQuill\Writing_01.wav
 - Data\Sound\FX\InkAndQuill\Writing_02.wav
