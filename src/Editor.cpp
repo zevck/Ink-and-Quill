@@ -820,7 +820,10 @@ namespace InkAndQuill::Editor {
     {
         if (!CanBegin(session)) return false;
         g_session = std::move(session);
-        g_sessionBlank = g_openingBlank;
+        // In onOpen, or later while the blank is still open (after the client's own message box): the blank's session.
+        auto* open = g_bookOpen && !g_openingBlank ? RE::BookMenu::GetTargetForm() : nullptr;
+        g_sessionBlank = g_openingBlank ? g_openingBlank : IsOwnBlank(open) ? open->GetFormID() : 0;
+        SKSE::log::info("[Editor] Session begun{}", g_sessionBlank ? std::format(" in blank {:08X}", g_sessionBlank) : std::string());
         Start();
         return true;
     }

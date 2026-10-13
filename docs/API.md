@@ -114,7 +114,7 @@ if (auto* module = GetModuleHandleA("InkAndQuill.dll")) {
 ## Versions
 
 - **1** (2026-10-03): the API as first released to Physical Diaries and Physical Letters.
-- **2** (2026-10-12): `IQ_Session::way`, `noBlood` and `onBegin` ([Starting](#starting)); Ink & Quill's own blood setting (`Writing.Blood`) is gone: whether a client's books can be written in blood is the client's to decide; `HasQuillOfGemination`, `HasSpecialInk`, `InSpecialInk` ([Special Ink](#special-ink)). A version 1 client's session (it ends at `onChange`) is `IQ_WRITE_ASK`, offering blood, with no `onBegin`.
+- **2** (2026-10-12): `IQ_Session::way`, `noBlood` and `onBegin` ([Starting](#starting)); Ink & Quill's own blood setting (`Writing.Blood`) is gone: whether a client's books can be written in blood is the client's to decide; a session begun while a blank is open in the book menu is the blank's even after `onOpen` has returned ([Blanks](#blanks)); `HasQuillOfGemination`, `HasSpecialInk`, `InSpecialInk` ([Special Ink](#special-ink)). A version 1 client's session (it ends at `onChange`) is `IQ_WRITE_ASK`, offering blood, with no `onBegin`.
 
 ## Is the player writing?
 
@@ -181,7 +181,7 @@ What a session edits: the book's text as the client renders it for reading, with
 - Reading it from the player's **own inventory** (not in the world, a container, a shop or the gift menu), or the edit key on it there, calls `onOpen(user, blankFormId)` once the menu has its text, with or without a quill.
 - **The client chooses when the blank becomes its book:**
   - **Now:** `ReplaceBlank(bookFormId, readingText)` in `onOpen` removes one blank and shows the book from its first page; a session begun after it (or none) is that book's.
-  - **On the first save:** `BeginSession` in the blank, then answer the first accepted save with `ReplySaveAsBook(reply, bookFormId, readingText)`: Ink & Quill charges the costs, removes one blank and shows `bookFormId` in the open menu. Without a quill such a session ends with a HUD notice, not a message box. The save ends the session; writing in that book again is an ordinary session (its owner's). `ReplySave` (no book) leaves the blank.
+  - **On the first save:** `BeginSession` in the blank, then answer the first accepted save with `ReplySaveAsBook(reply, bookFormId, readingText)`. The session is the blank's when it's begun in `onOpen`, or later while the blank is still open in the book menu (after the client's own message box, say); the log names the blank at `Begin`. Then Ink & Quill charges the costs, removes one blank and shows `bookFormId` in the open menu. Without a quill such a session ends with a HUD notice, not a message box. The save ends the session; writing in that book again is an ordinary session (its owner's). `ReplySave` (no book) leaves the blank.
 - Discard or putting the quill down: nothing is made, the blank stays.
 
 ## Clients' keys

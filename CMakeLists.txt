@@ -5,7 +5,7 @@ set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "" FORCE)
 
 project(
     InkAndQuill
-    VERSION 0.1.0
+    VERSION 0.2.0
     LANGUAGES CXX
 )
 
