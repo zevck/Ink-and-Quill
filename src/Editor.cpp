@@ -22,6 +22,7 @@
 #include "BookMovie.h"
 #include "Bookmarks.h"
 #include "Clipboard.h"
+#include "Gemination.h"
 #include "Input.h"
 #include "Keys.h"
 #include "QuillCursor.h"
@@ -59,6 +60,7 @@ namespace InkAndQuill::Editor {
         std::atomic<bool> g_active{ false };     // edit mode is on in the open book menu
         std::atomic<bool> g_prompting{ false };  // a prompt is open over the book: keys belong to it
         bool g_blood = false;                    // this session is in blood (no ink)
+        bool g_special = false;                  // this session is in Special Ink (the Quill of Gemination's)
         bool g_free = false;                     // this session needs no quill or ink (Settings::kRequireQuillAndInk off)
         RE::FormID g_beginOnOpen = 0;            // begin g_session once this book is open with its text
 
@@ -280,9 +282,10 @@ namespace InkAndQuill::Editor {
             bool changed = false;
             for (std::size_t i = 0; i < bodies->size(); ++i) changed = changed || (*bodies)[i] != g_edit[i].saved;
             if (!changed) return SaveResult::Nothing;
-            if (!g_free && (g_blood ? !WritingTools::CanBleed() : !WritingTools::HasInk())) {
-                // Checked when writing began; the inkwell or the health may have gone since.
-                ShowNotice(Strings::Get(g_blood ? "$IQ_TooWeak" : "$IQ_NeedsInk"));
+            // Checked when writing began; the inkwell, the bottle or the health may have gone since.
+            if (g_special ? !Gemination::HasQuill() || !Gemination::HasInk()
+                          : !g_free && (g_blood ? !WritingTools::CanBleed() : !WritingTools::HasInk())) {
+                ShowNotice(Strings::Get(g_special ? "$IQ_NeedsSpecialInk" : g_blood ? "$IQ_TooWeak" : "$IQ_NeedsInk"));
                 return SaveResult::Refused;
             }
             auto saved = g_session.client.onSave ? g_session.client.onSave(*bodies) : Saved{};
@@ -291,7 +294,9 @@ namespace InkAndQuill::Editor {
                 if (!saved.message.empty()) ShowNotice(saved.message);
                 return SaveResult::Refused;
             }
-            if (!g_free) {
+            if (g_special) {
+                if (const auto ink = Gemination::UseInk()) g_touched.insert(ink);
+            } else if (!g_free) {
                 if (g_blood) {
                     WritingTools::Bleed();
                 } else if (WritingTools::UseInk() == WritingTools::Ink::RanDry) {
@@ -301,7 +306,7 @@ namespace InkAndQuill::Editor {
             for (std::size_t i = 0; i < bodies->size(); ++i) g_edit[i] = { (*bodies)[i] };
             if (g_sessionBlank != 0) ReplaceBlank(saved.book);
             if (auto* book = RE::BookMenu::GetTargetForm()) g_touched.insert(book->GetFormID());
-            if (!g_free && !g_blood && WritingTools::LastInkwell() != 0) g_touched.insert(WritingTools::LastInkwell());
+            if (!g_free && !g_blood && !g_special && WritingTools::LastInkwell() != 0) g_touched.insert(WritingTools::LastInkwell());
             if (readText) *readText = std::move(saved.text);
             SKSE::log::info("[Editor] Saved");
             return SaveResult::Saved;
@@ -340,6 +345,13 @@ namespace InkAndQuill::Editor {
                 movie->Invoke("_root.BookMenu_mc.EditSetBlood", nullptr, &on, 1);
                 SKSE::log::info("[Editor] Writing in blood");
             }
+            if (g_special) {
+                RE::GFxValue on;
+                on.SetBoolean(true);
+                movie->Invoke("_root.BookMenu_mc.EditSetSpecialInk", nullptr, &on, 1);
+                Notify(Strings::Get("$IQ_WritingSpecialInk"));
+                SKSE::log::info("[Editor] Writing in Special Ink");
+            }
             SetTextInput(true);
             QuillCursor::Show();
             SKSE::log::info("[Editor] Edit mode on");
@@ -347,6 +359,9 @@ namespace InkAndQuill::Editor {
                 RE::GFxValue run;
                 run.SetNumber(g_session.caretRun);
                 movie->Invoke("_root.BookMenu_mc.EditFocusEntry", nullptr, &run, 1);
+            }
+            if (const auto onBegin = g_session.client.onBegin) {  // a copy: the session may end in it
+                onBegin(g_special ? Way::SpecialInk : g_blood ? Way::Blood : Way::Ink);
             }
         }
 
@@ -497,54 +512,44 @@ namespace InkAndQuill::Editor {
             }
         };
 
-        // A quill, then ink or the blood prompt, then edit mode (docs/EDITOR.md#starting).
+        // Writing can't begin: a notice (on a blank a HUD notice, not a prompt: blanks get read often), and the session ends.
+        void Refuse(const char* why, std::string_view message)
+        {
+            SKSE::log::info("[Editor] Can't write: {}", why);
+            if (g_sessionBlank != 0) {
+                Notify(Strings::Get(message));
+            } else {
+                ShowNotice(Strings::Get(message));
+            }
+            EndSession();
+        }
+
+        // The session's way (docs/EDITOR.md#starting): Ask is a quill, then ink or the blood prompt; a client's choice
+        // checks only its own materials.  Special Ink is never free.  Then edit mode.
         void Start()
         {
-            g_blood = false;
-            g_free = !Settings::Get(Settings::kRequireQuillAndInk);
+            const auto way = g_session.way;
+            g_blood = way == Way::Blood;
+            g_special = way == Way::SpecialInk;
+            g_free = !g_special && !Settings::Get(Settings::kRequireQuillAndInk);
             if (auto* ui = RE::UI::GetSingleton(); ui && !ui->GameIsPaused()) {
                 SKSE::log::info("[Editor] The book menu doesn't pause the game (Skyrim Souls?)");
             }
-            if (g_free) {
-                EnterEditMode();
-                return;
-            }
-            if (!WritingTools::HasQuill()) {
-                SKSE::log::info("[Editor] No quill: can't write");
-                // In a blank a HUD notice, not a prompt: blanks get read often.
-                if (g_sessionBlank != 0) {
-                    Notify(Strings::Get("$IQ_NeedsQuill"));
-                } else {
-                    ShowNotice(Strings::Get("$IQ_NeedsQuill"));
+            if (g_special) {
+                if (!Gemination::HasQuill() || !Gemination::HasInk()) return Refuse("no Quill of Gemination or Special Ink", "$IQ_NeedsSpecialInk");
+            } else if (!g_free) {
+                const bool ink = WritingTools::HasInk();
+                if (!WritingTools::HasQuill()) return Refuse("no quill", "$IQ_NeedsQuill");
+                if (way == Way::Ink && !ink) return Refuse("no ink", "$IQ_NeedsInk");
+                if (way == Way::Blood && !WritingTools::CanBleed()) return Refuse("too weak to write in blood", "$IQ_TooWeak");
+                if (way == Way::Ask && !ink) {
+                    if (g_session.noBlood) return Refuse("no ink, and the client offers no blood", "$IQ_NeedsInk");
+                    // Blood offered here would only end in a refused save, with nothing left but discarding.
+                    if (!WritingTools::CanBleed()) return Refuse("no ink, and too weak to write in blood", "$IQ_TooWeak");
+                    SKSE::log::info("[Editor] No ink: offering blood");
+                    ShowPrompt(Strings::Get("$IQ_BloodPrompt"), { "$IQ_BloodYes", "$IQ_BloodNo" }, 1, new BloodCallback());
+                    return;
                 }
-                EndSession();
-                return;
-            }
-            if (!WritingTools::HasInk() && !Settings::Get(Settings::kBlood)) {
-                SKSE::log::info("[Editor] No ink, and blood is off: can't write");
-                if (g_sessionBlank != 0) {
-                    Notify(Strings::Get("$IQ_NeedsInk"));
-                } else {
-                    ShowNotice(Strings::Get("$IQ_NeedsInk"));
-                }
-                EndSession();
-                return;
-            }
-            if (!WritingTools::HasInk() && !WritingTools::CanBleed()) {
-                // Blood offered here would only end in a refused save, with nothing left but discarding.
-                SKSE::log::info("[Editor] No ink, and too weak to write in blood: can't write");
-                if (g_sessionBlank != 0) {
-                    Notify(Strings::Get("$IQ_TooWeak"));
-                } else {
-                    ShowNotice(Strings::Get("$IQ_TooWeak"));
-                }
-                EndSession();
-                return;
-            }
-            if (!WritingTools::HasInk()) {
-                SKSE::log::info("[Editor] No ink: offering blood");
-                ShowPrompt(Strings::Get("$IQ_BloodPrompt"), { "$IQ_BloodYes", "$IQ_BloodNo" }, 1, new BloodCallback());
-                return;
             }
             EnterEditMode();
         }
@@ -909,9 +914,11 @@ namespace InkAndQuill::Editor {
 
     bool InBlood() { return g_active && g_blood; }
 
+    bool InSpecialInk() { return g_active && g_special; }
+
     bool WouldBeInBlood()
     {
-        return Settings::Get(Settings::kRequireQuillAndInk) && Settings::Get(Settings::kBlood) && WritingTools::HasQuill() &&
+        return Settings::Get(Settings::kRequireQuillAndInk) && WritingTools::HasQuill() &&
                !WritingTools::HasInk();
     }
 
@@ -934,6 +941,7 @@ namespace InkAndQuill::Editor {
         g_beginOnOpen = 0;
         g_blankOnOpen = 0;
         g_blood = false;
+        g_special = false;
         EndSession();
     }
 

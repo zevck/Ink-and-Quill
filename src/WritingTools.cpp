@@ -92,11 +92,6 @@ namespace InkAndQuill::WritingTools {
             }
         }
 
-        int Count(RE::PlayerCharacter* player, RE::TESBoundObject* item)
-        {
-            return item ? player->GetInventoryCounts([item](RE::TESBoundObject& i) { return &i == item; })[item] : 0;
-        }
-
         // Any such item the player carries.
         bool CarriesAny(RE::PlayerCharacter* player, bool (*is)(const RE::TESForm*))
         {
@@ -242,19 +237,25 @@ namespace InkAndQuill::WritingTools {
 
     }
 
+    RE::TESObjectCONT* MerchantChest(const RE::TESFaction* faction)
+    {
+        auto* ref = faction && faction->IsVendor() ? faction->vendorData.merchantContainer : nullptr;
+        auto* base = ref ? ref->GetBaseObject() : nullptr;
+        return base ? base->As<RE::TESObjectCONT>() : nullptr;
+    }
+
+    int Count(RE::PlayerCharacter* player, RE::TESBoundObject* item)
+    {
+        return player && item ? player->GetInventoryCounts([item](RE::TESBoundObject& i) { return &i == item; })[item] : 0;
+    }
+
     void OnDataLoaded()
     {
         auto* data = RE::TESDataHandler::GetSingleton();
         g_quills = data ? data->LookupForm<RE::BGSListForm>(kQuillsList, kPlugin) : nullptr;
         g_inkwells = data ? data->LookupForm<RE::BGSListForm>(kInkwellsList, kPlugin) : nullptr;
         if (!g_quills || !g_inkwells) SKSE::log::error("[WritingTools] {}'s quill or inkwell list is missing", kPlugin);
-        // Ink & Quill's own INI, then each mod's file in SKSE/Plugins/InkAndQuill/.
-        std::vector<std::string> files{ Settings::IniPath() };
-        std::error_code ec;
-        for (const auto& file : std::filesystem::directory_iterator(Settings::kModFilesFolder, ec)) {
-            if (file.path().extension() == ".ini") files.push_back(std::filesystem::absolute(file.path()).string());
-        }
-        for (const auto& file : files) {
+        for (const auto& file : Settings::IniFiles()) {
             ReadMaterials(file, "Quills", g_extraQuills);
             ReadMaterials(file, "Inkwells", g_extraInkwells);
         }
@@ -284,9 +285,7 @@ namespace InkAndQuill::WritingTools {
             auto* data = RE::TESDataHandler::GetSingleton();
             int stocked = 0;
             for (auto* faction : data->GetFormArray<RE::TESFaction>()) {
-                if (!faction || !faction->IsVendor() || !faction->vendorData.merchantContainer) continue;
-                auto* base = faction->vendorData.merchantContainer->GetBaseObject();
-                auto* chest = base ? base->As<RE::TESObjectCONT>() : nullptr;
+                auto* chest = MerchantChest(faction);
                 // Not a general store, or already stocked (several merchants can share a chest).
                 if (!chest || chest->GetObjectCount(generalGoods) == 0 || chest->GetObjectCount(ours) > 0) continue;
                 if (IsGenericContainer(chest)) {

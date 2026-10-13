@@ -18,8 +18,10 @@
  */
 
 #include "Editor.h"
+#include "Gemination.h"
 #include "Input.h"
 #include "Papyrus.h"
+#include "Serialization.h"
 #include "Settings.h"
 #include "Strings.h"
 #include "WritingMode.h"
@@ -41,6 +43,7 @@ namespace {
             InkAndQuill::Settings::Load();
             InkAndQuill::Strings::Load();
             InkAndQuill::WritingTools::OnDataLoaded();
+            InkAndQuill::Gemination::OnDataLoaded(InkAndQuill::WritingMode::IsOn());
             if (InkAndQuill::WritingMode::IsOn()) {
                 InkAndQuill::Editor::Register();
                 InkAndQuill::WritingTools::AddToMerchants();
@@ -51,9 +54,11 @@ namespace {
             break;
         case SKSE::MessagingInterface::kNewGame:
             InkAndQuill::Editor::Reset();
+            InkAndQuill::Gemination::OnGameLoaded();
             if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Input::InstallHook();
             break;
         case SKSE::MessagingInterface::kPostLoadGame:
+            InkAndQuill::Gemination::OnGameLoaded();
             if (InkAndQuill::WritingMode::IsOn()) InkAndQuill::Input::InstallHook();
             break;
         default:
@@ -91,5 +96,6 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
         return false;
     }
     InkAndQuill::Papyrus::Register();
+    InkAndQuill::Serialization::Register();
     return true;
 }

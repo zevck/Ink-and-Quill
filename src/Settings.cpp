@@ -19,6 +19,8 @@
 
 #include "Settings.h"
 
+#include "Gemination.h"
+
 #include <Windows.h>
 
 namespace InkAndQuill::Settings {
@@ -42,6 +44,16 @@ namespace InkAndQuill::Settings {
 
     std::string IniPath() { return Path(); }
 
+    std::vector<std::string> IniFiles()
+    {
+        std::vector<std::string> files{ Path() };
+        std::error_code ec;
+        for (const auto& file : std::filesystem::directory_iterator(kModFilesFolder, ec)) {
+            if (file.path().extension() == ".ini") files.push_back(std::filesystem::absolute(file.path()).string());
+        }
+        return files;
+    }
+
     namespace {
         // Debug.Logging: the log's level, at once.
         void ApplyLogLevel()
@@ -61,8 +73,8 @@ namespace InkAndQuill::Settings {
             const auto& s = *kAll[i];
             g_values[i] = std::clamp(static_cast<int>(GetPrivateProfileIntA(s.section, s.key, s.defaultValue, path.c_str())), s.min, s.max);
         }
-        SKSE::log::info("[Settings] Edit key 0x{:X}, inkwell uses {}, blood {} ({}%), quill and ink {}",
-                        EditKey(), Get(kInkwellUses), Get(kBlood) ? "on" : "off", Get(kBloodCost),
+        SKSE::log::info("[Settings] Edit key 0x{:X}, inkwell uses {}, blood cost {}%, quill and ink {}",
+                        EditKey(), Get(kInkwellUses), Get(kBloodCost),
                         Get(kRequireQuillAndInk) ? "required" : "not required");
         ApplyLogLevel();
     }
@@ -86,6 +98,7 @@ namespace InkAndQuill::Settings {
         }
         SKSE::log::info("[Settings] {}.{} = {}", setting.section, setting.key, value);
         if (&setting == &kDebugLog) ApplyLogLevel();
+        if (&setting == &kSpecialInkPrice) Gemination::ApplyPrice();
     }
 
 }

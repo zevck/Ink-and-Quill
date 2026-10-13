@@ -20,6 +20,7 @@
 #include "Papyrus.h"
 
 #include "Clients.h"
+#include "Gemination.h"
 #include "Keys.h"
 #include "Settings.h"
 
@@ -84,6 +85,9 @@ namespace InkAndQuill::Papyrus {
             return dot == std::string::npos ? client.file : client.file.substr(0, dot);
         }
 
+        // Enthir sells Ink & Quill's Special Ink (the FOMOD chose no Snazzy Special Ink): its price applies.
+        bool IsSpecialInkSold(RE::StaticFunctionTag*) { return Gemination::SoldByEnthir(); }
+
         bool RegisterFunctions(RE::BSScript::IVirtualMachine* vm)
         {
             vm->RegisterFunction("GetSetting", kScript, GetSetting);
@@ -94,6 +98,7 @@ namespace InkAndQuill::Papyrus {
             vm->RegisterFunction("GetKeyProblem", kScript, GetKeyProblem);
             vm->RegisterFunction("GetClientCount", kScript, GetClientCount);
             vm->RegisterFunction("GetClientName", kScript, GetClientName);
+            vm->RegisterFunction("IsSpecialInkSold", kScript, IsSpecialInkSold);
             return true;
         }
     }

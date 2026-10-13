@@ -1,0 +1,12 @@
+FormKey: 000807:InkAndQuill.esp
+EditorID: InkAndQuillSpecialInk
+ObjectBounds:
+  First: -3, -3, 0
+  Second: 3, 3, 8
+Name:
+  TargetLanguage: English
+  Value: Special Ink
+Model:
+  File: Clutter\Common\InkWell01.nif
+Value: 500
+Weight: 0.3

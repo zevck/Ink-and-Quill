@@ -47,6 +47,9 @@ namespace InkAndQuill::Editor {
         RE::FormID book = 0;  // a blank's session: the book that replaces the blank (0: the blank stays)
     };
 
+    // How a session writes: Ask lets Ink & Quill decide (ink, else blood offered); the others are the client's choice.
+    enum class Way { Ask, Ink, Blood, SpecialInk };
+
     struct Client {
         std::function<Saved(const std::vector<std::string>& bodies)> onSave;  // the bodies in page order
         std::function<void()> onDiscard;
@@ -54,12 +57,16 @@ namespace InkAndQuill::Editor {
         std::function<void()> onEnd;
         // The player changed a run's text: its index and the caret's offset in it (docs/API.md#reacting-to-typing).
         std::function<void(int run, int caretOffset)> onChange;
+        // Writing has begun, before the player types: how (never Ask).
+        std::function<void(Way)> onBegin;
     };
 
     struct Session {
         Document document;
         Client client;
         int caretRun = -1;  // begin at the end of this run (-1: the page being read)
+        Way way = Way::Ask;
+        bool noBlood = false;  // Ask: no ink is the NeedsInk notice, not the blood prompt (the client's setting)
     };
 
     // The edit key in an open book asks each owner in turn; one that owns the book calls Begin and returns true.
@@ -92,12 +99,14 @@ namespace InkAndQuill::Editor {
     // The client opens the menu.  False as Begin.
     bool BeginOnOpen(RE::FormID book, Session session);
 
-    // The player is writing, and in blood.
+    // The player is writing, and in blood or Special Ink.
     bool IsWriting();
     bool IsPrompting();  // a prompt is open over the book
     bool InBlood();
+    bool InSpecialInk();
 
-    // A session begun now would be in blood, unless the player declines (quill and ink required, blood on, no ink):
+    // A session begun now with Way::Ask would be in blood, unless the player declines or it sets noBlood (quill and ink
+    // required, a quill, no ink):
     // for a client choosing a new entry's heading before it begins.
     bool WouldBeInBlood();
 

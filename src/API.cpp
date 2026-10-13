@@ -23,6 +23,7 @@
 
 #include "Clients.h"
 #include "Editor.h"
+#include "Gemination.h"
 #include "Input.h"
 #include "Keys.h"
 #include "Settings.h"
@@ -36,6 +37,11 @@ struct IQ_SaveReply {
     bool answered = false;
 };
 
+// IQ_WriteWay is Editor::Way, value for value.
+static_assert(static_cast<int>(InkAndQuill::Editor::Way::Ask) == IQ_WRITE_ASK && static_cast<int>(InkAndQuill::Editor::Way::Ink) == IQ_WRITE_INK &&
+              static_cast<int>(InkAndQuill::Editor::Way::Blood) == IQ_WRITE_BLOOD &&
+              static_cast<int>(InkAndQuill::Editor::Way::SpecialInk) == IQ_WRITE_SPECIAL_INK);
+
 
 namespace {
     using namespace InkAndQuill;
@@ -45,8 +51,9 @@ namespace {
     // The C session as the editor's.  nullopt (logged, its onEnd run) if it can't be one.
     std::optional<Editor::Session> ToSession(const IQ_Session* in)
     {
-        if (!in || in->size < sizeof(IQ_Session)) {
-            SKSE::log::error("[API] A session from an older or broken client (size {}): ignored", in ? in->size : 0);
+        // Version 1's session ends at onChange; a newer header's fields past it read as zero (docs/API.md#versions).
+        if (!in || in->size < offsetof(IQ_Session, way)) {
+            SKSE::log::error("[API] A broken session (size {}): ignored", in ? in->size : 0);
             return std::nullopt;
         }
         if (!in->markedText || !*in->markedText || !in->onSave) {
@@ -54,12 +61,20 @@ namespace {
             if (in->onEnd) in->onEnd(in->user);
             return std::nullopt;
         }
-        const IQ_Session c = *in;
+        IQ_Session c{};
+        std::memcpy(&c, in, std::min<std::size_t>(in->size, sizeof(IQ_Session)));
+        if (c.way < IQ_WRITE_ASK || c.way > IQ_WRITE_SPECIAL_INK) {
+            SKSE::log::error("[API] A session with an unknown way ({}): ignored", c.way);
+            if (c.onEnd) c.onEnd(c.user);
+            return std::nullopt;
+        }
         Editor::Session session;
         session.document.marked = c.markedText;
         session.document.runFont = Copy(c.runFont);
         session.document.runSize = c.runSize;
         session.caretRun = c.caretRun;
+        session.way = static_cast<Editor::Way>(c.way);
+        session.noBlood = c.noBlood;
         auto& client = session.client;
         client.onSave = [c](const std::vector<std::string>& runs) {
             std::vector<const char*> texts;
@@ -73,6 +88,7 @@ namespace {
         if (c.onDiscard) client.onDiscard = [c]() { c.onDiscard(c.user); };
         if (c.onEnd) client.onEnd = [c]() { c.onEnd(c.user); };
         if (c.onChange) client.onChange = [c](int run, int offset) { c.onChange(c.user, run, offset); };
+        if (c.onBegin) client.onBegin = [c](Editor::Way way) { c.onBegin(c.user, static_cast<std::int32_t>(way)); };
         return session;
     }
 
@@ -231,6 +247,9 @@ namespace {
     }
 
     bool CanBleed() { return WritingTools::CanBleed(); }
+    bool HasQuillOfGemination() { return Gemination::HasQuill(); }
+    bool HasSpecialInk() { return Gemination::HasInk(); }
+    bool InSpecialInk() { return Editor::InSpecialInk(); }
     bool Bleed() { return WritingTools::Bleed(); }
 
     constexpr IQ_API kAPI{
@@ -260,6 +279,9 @@ namespace {
         .Prompt = Prompt,
         .Suggest = Suggest,
         .CheckKey = CheckKey,
+        .HasQuillOfGemination = HasQuillOfGemination,
+        .HasSpecialInk = HasSpecialInk,
+        .InSpecialInk = InSpecialInk,
     };
 }
 

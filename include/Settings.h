@@ -36,20 +36,23 @@ namespace InkAndQuill::Settings {
     inline constexpr Setting kContentsKey{ "Keys", "Contents", 0xC7, 1, 255 };  // Home, reading: the bookmark list
     inline constexpr Setting kInkwellUses{ "Writing", "InkwellUses", 10, 0, 100 };  // saves a full inkwell lasts; 0: never runs dry
     inline constexpr Setting kBloodCost{ "Writing", "BloodCost", 10, 1, 100 };      // % of maximum health per save
-    inline constexpr Setting kBlood{ "Writing", "Blood", 1, 0, 1 };                 // offered when there's no ink
     inline constexpr Setting kRequireQuillAndInk{ "Writing", "RequireQuillAndInk", 1, 0, 1 };  // 0: writing is free
     inline constexpr Setting kQuillCursor{ "Writing", "QuillCursor", 1, 0, 1 };  // the game's quill at the caret, in place of it
+    inline constexpr Setting kSpecialInkPrice{ "Writing", "SpecialInkPrice", 500, 0, 10000 };  // Enthir's Special Ink's base value
     inline constexpr Setting kQuillAdjust{ "Debug", "QuillAdjust", 0, 0, 1 };    // the numpad poses the quill (QuillCursor.h)
     inline constexpr Setting kDebugLog{ "Debug", "Logging", 0, 0, 1 };           // the log at debug level, not info
 
-    inline constexpr const Setting* kAll[] = { &kEditKey, &kContentsKey, &kInkwellUses, &kBloodCost, &kBlood, &kRequireQuillAndInk, &kQuillCursor, &kQuillAdjust,
-                                               &kDebugLog };
+    inline constexpr const Setting* kAll[] = { &kEditKey, &kContentsKey, &kInkwellUses, &kBloodCost, &kRequireQuillAndInk, &kQuillCursor, &kQuillAdjust,
+                                               &kDebugLog, &kSpecialInkPrice };
 
     void Load();
 
     // SKSE/Plugins/InkAndQuill.ini, absolute.  Other mods' own INI files go in kModFilesFolder ([Materials]).
     std::string IniPath();
     inline constexpr auto kModFilesFolder = "Data/SKSE/Plugins/InkAndQuill";
+
+    // IniPath, then every .ini in kModFilesFolder (other mods' files, the FOMOD's): absolute.
+    std::vector<std::string> IniFiles();
 
     // "Section.Key" (any case: a Papyrus string may come back in another), or nullptr.
     const Setting* Find(std::string_view name);

@@ -1,0 +1,10 @@
+FormKey: 000809:InkAndQuill.esp
+EditorID: InkAndQuillLItemSpecialInk
+Flags:
+- CalculateFromAllLevelsLessThanOrEqualPlayer
+- UseAll
+Entries:
+- Data:
+    Level: 1
+    Reference: 000807:InkAndQuill.esp
+    Count: 1

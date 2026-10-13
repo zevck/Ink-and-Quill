@@ -10,13 +10,14 @@ int  Function GetSettingMax(string name)               global native
 int    Function GetKeyProblem(int keyCode)             global native
 int    Function GetClientCount()                       global native
 string Function GetClientName(int index)               global native
+bool   Function IsSpecialInkSold()                     global native
 
 int _editKeyOid
 int _contentsOid
 int _requireOid
 int _usesOid
-int _bloodOid
 int _bloodCostOid
+int _inkPriceOid
 int _quillOid
 int _adjustOid
 int _debugLogOid
@@ -25,7 +26,7 @@ event OnConfigInit()
     ModName = "Ink & Quill"
 endevent
 
-; Greyed out when it doesn't apply: inkwells and blood without quill and ink required, the cost without blood.
+; Greyed out when it does not apply: inkwell uses and blood cost without quill and ink required.
 int function WritingFlags()
     if GetSetting("Writing.RequireQuillAndInk") == 0
         return OPTION_FLAG_DISABLED
@@ -33,11 +34,12 @@ int function WritingFlags()
     return OPTION_FLAG_NONE
 endfunction
 
-int function BloodCostFlags()
-    if GetSetting("Writing.Blood") == 0
+; Greyed out when the FOMOD chose Snazzy's Special Ink: Enthir doesn't sell it then.
+int function InkPriceFlags()
+    if !IsSpecialInkSold()
         return OPTION_FLAG_DISABLED
     endif
-    return WritingFlags()
+    return OPTION_FLAG_NONE
 endfunction
 
 event OnPageReset(string page)
@@ -49,8 +51,8 @@ event OnPageReset(string page)
     AddHeaderOption("$IQ_HeaderWriting")
     _requireOid = AddToggleOption("$IQ_Materials", GetSetting("Writing.RequireQuillAndInk") != 0)
     _usesOid = AddSliderOption("$IQ_InkwellUses", GetSetting("Writing.InkwellUses"), UsesFormat(), WritingFlags())
-    _bloodOid = AddToggleOption("$IQ_Blood", GetSetting("Writing.Blood") != 0, WritingFlags())
-    _bloodCostOid = AddSliderOption("$IQ_BloodCost", GetSetting("Writing.BloodCost"), "{0}%", BloodCostFlags())
+    _bloodCostOid = AddSliderOption("$IQ_BloodCost", GetSetting("Writing.BloodCost"), "{0}%", WritingFlags())
+    _inkPriceOid = AddSliderOption("$IQ_SpecialInkPrice", GetSetting("Writing.SpecialInkPrice"), "{0}", InkPriceFlags())
     _quillOid = AddToggleOption("$IQ_QuillCursor", GetSetting("Writing.QuillCursor") != 0)
 
     SetCursorPosition(1)
@@ -76,10 +78,10 @@ string function SettingOf(int oid)
         return "Writing.RequireQuillAndInk"
     elseif oid == _usesOid
         return "Writing.InkwellUses"
-    elseif oid == _bloodOid
-        return "Writing.Blood"
     elseif oid == _bloodCostOid
         return "Writing.BloodCost"
+    elseif oid == _inkPriceOid
+        return "Writing.SpecialInkPrice"
     elseif oid == _quillOid
         return "Writing.QuillCursor"
     elseif oid == _adjustOid
@@ -114,12 +116,11 @@ endfunction
 
 function UpdateFlags()
     SetOptionFlags(_usesOid, WritingFlags(), true)
-    SetOptionFlags(_bloodOid, WritingFlags(), true)
-    SetOptionFlags(_bloodCostOid, BloodCostFlags())
+    SetOptionFlags(_bloodCostOid, WritingFlags())
 endfunction
 
 event OnOptionSelect(int oid)
-    if oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
+    if oid == _requireOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
         string name = SettingOf(oid)
         bool enabled = GetSetting(name) == 0
         SetSetting(name, enabled as int)
@@ -130,16 +131,20 @@ endevent
 
 event OnOptionSliderOpen(int oid)
     string name = SettingOf(oid)
-    if oid == _usesOid || oid == _bloodCostOid
+    if oid == _usesOid || oid == _bloodCostOid || oid == _inkPriceOid
         SetSliderDialogStartValue(GetSetting(name))
         SetSliderDialogDefaultValue(GetSettingDefault(name))
         SetSliderDialogRange(GetSettingMin(name), GetSettingMax(name))
-        SetSliderDialogInterval(1)
+        if oid == _inkPriceOid
+            SetSliderDialogInterval(50)
+        else
+            SetSliderDialogInterval(1)
+        endif
     endif
 endevent
 
 event OnOptionSliderAccept(int oid, float value)
-    if oid == _usesOid || oid == _bloodCostOid
+    if oid == _usesOid || oid == _bloodCostOid || oid == _inkPriceOid
         string name = SettingOf(oid)
         SetSetting(name, value as int)
         SetSliderOptionValue(oid, GetSetting(name), FormatOf(oid))
@@ -182,7 +187,7 @@ event OnOptionDefault(int oid)
     int value = GetSetting(name)
     if oid == _editKeyOid || oid == _contentsOid
         SetKeyMapOptionValue(oid, value)
-    elseif oid == _requireOid || oid == _bloodOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
+    elseif oid == _requireOid || oid == _quillOid || oid == _adjustOid || oid == _debugLogOid
         SetToggleOptionValue(oid, value != 0)
         UpdateFlags()
     else
@@ -199,10 +204,10 @@ event OnOptionHighlight(int oid)
         SetInfoText("$IQ_TipMaterials")
     elseif oid == _usesOid
         SetInfoText("$IQ_TipInkwellUses")
-    elseif oid == _bloodOid
-        SetInfoText("$IQ_TipBlood")
     elseif oid == _bloodCostOid
         SetInfoText("$IQ_TipBloodCost")
+    elseif oid == _inkPriceOid
+        SetInfoText("$IQ_TipSpecialInkPrice")
     elseif oid == _quillOid
         SetInfoText("$IQ_TipQuillCursor")
     elseif oid == _adjustOid

@@ -73,6 +73,8 @@ $folders = [ordered]@{
     "00 Core\Source\Scripts"         = "Source\Scripts"
     "00 Core\Interface\Translations" = "Interface\Translations"
     "00 Core\Sound\FX\InkAndQuill"   = "Sound\FX\InkAndQuill"
+    "03 Snazzy Location Resources"   = "fomod-options\Snazzy Location Resources"
+    "04 Snazzy Riften"               = "fomod-options\Snazzy Riften"
     "fomod"                         = "fomod"
 }
 foreach ($to in $files.Keys) {

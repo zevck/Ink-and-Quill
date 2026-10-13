@@ -2,7 +2,7 @@
 
 How a client mod uses Ink & Quill's editor. Header: [`api/InkAndQuillAPI.h`](../api/InkAndQuillAPI.h), the one file a client needs (plain C; copy it into the client). Code: `src/API.cpp`, over `Editor` and `WritingTools`. The design and its reasons are in [API_DESIGN.md](API_DESIGN.md); the editor's behaviour in [EDITOR.md](EDITOR.md).
 
-**Status:** version 1, unreleased: its layout still changes, and a client rebuilds with the current header. Physical Diaries and Physical Letters use it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
+**Status:** version 2 ([Versions](#versions)). A client built with an older header keeps working with a newer DLL; a newer header needs a DLL at least as new. Physical Diaries and Physical Letters use it. There's no Papyrus API ([API_DESIGN.md](API_DESIGN.md#papyrus-api)).
 
 ## Quick start
 
@@ -109,7 +109,12 @@ if (auto* module = GetModuleHandleA("InkAndQuill.dll")) {
 }
 ```
 
-`IQ_GetAPI(version)` returns `NULL` if the DLL is older than the client's header. After the first release a newer DLL serves older clients: structs only grow at the end, and `IQ_API::size` and `IQ_Session::size` say how much there is.
+`IQ_GetAPI(version)` returns `NULL` if the DLL is older than the client's header. A newer DLL serves older clients: structs only grow at the end, and `IQ_API::size` and `IQ_Session::size` say how much there is (a field a client's header doesn't have reads as zero).
+
+## Versions
+
+- **1** (2026-10-03): the API as first released to Physical Diaries and Physical Letters.
+- **2** (2026-10-12): `IQ_Session::way`, `noBlood` and `onBegin` ([Starting](#starting)); Ink & Quill's own blood setting (`Writing.Blood`) is gone: whether a client's books can be written in blood is the client's to decide; `HasQuillOfGemination`, `HasSpecialInk`, `InSpecialInk` ([Special Ink](#special-ink)). A version 1 client's session (it ends at `onChange`) is `IQ_WRITE_ASK`, offering blood, with no `onBegin`.
 
 ## Is the player writing?
 
@@ -138,11 +143,14 @@ What a session edits: the book's text as the client renders it for reading, with
 - **The edit key.** `AddOwner(owner, user)` at `kDataLoaded` or later. With a book open and nobody writing, the edit key asks each owner in turn with the book's FormID; the one that owns it calls `BeginSession` and returns true. No owner: the key does nothing.
 - **A client's own key.** `BeginSession(&session)` with the book menu open, or `BeginSessionOnOpen(bookFormId, &session)` after opening it (`BookMenu::OpenMenuFromBaseForm`): it begins once the menu has the book's text.
 - **`IQ_Session`:** `markedText` and `onSave` are required. `runFont` and `runSize` are the format hint for typed text, line breaks included. **Render your line and paragraph breaks inside your font tags**, in the text's own size. A line is as tall as its biggest character, its line break included. A break outside your tags gets the page's size instead, so a blank line comes out taller or shorter than a text line. **In your reading text, put a non-breaking space (`&nbsp;`) on every blank line** (not in the marked text). The game lays out a book's pages itself, with or without Ink & Quill, and it finds each line by its first character: an empty line never starts a new page, so text whose overflow is blank lines stays on one page and a page's leading blank lines vanish. With `&nbsp;` the game breaks pages where the editor does. `caretRun` puts the caret at the end of that run (a new entry); -1 starts on the page being read.
+- **`way`** (an `IQ_WriteWay`): `IQ_WRITE_ASK` (0, the default) lets Ink & Quill decide: ink if the player has some, else it offers blood. A client with its own choice (its own message box: "Ink / Blood / Special Ink") passes `IQ_WRITE_INK`, `IQ_WRITE_BLOOD` or `IQ_WRITE_SPECIAL_INK`: Ink & Quill then checks only that way's materials and never prompts; a missing one shows its notice (`NeedsQuill`, `NeedsInk`, `TooWeak`, `NeedsSpecialInk`) and ends the session. `Writing.RequireQuillAndInk` off makes ink and blood free, never Special Ink. The materials are `HasQuill`, `HasInk`, `CanBleed` and `HasQuillOfGemination` with `HasSpecialInk`, for building that choice.
+- **Blood is the client's to allow.** Ink & Quill has no setting for it (it keeps the cost, `Writing.BloodCost`, and the check that the player can afford it, `CanBleed`). A client that lets the player switch blood off in its own MCM leaves `IQ_WRITE_BLOOD` out of its choice, or with `IQ_WRITE_ASK` sets **`noBlood`**: then a player with no ink gets the `NeedsInk` notice instead of the blood prompt.
+- **`onBegin(user, way)`** (optional): writing has begun (the checks and any blood prompt are done), before the player types: `IQ_WRITE_INK`, `IQ_WRITE_BLOOD` or `IQ_WRITE_SPECIAL_INK`, never `ASK`. A `Reload` from here (text the client adds for that way) shows before the first keystroke.
 - **False** from either: not started (writing off, already writing, a prompt open, an invalid session), and `onEnd` has run. True: the quill and ink checks and the blood prompt follow, and may still end it.
 
 ## While writing
 
-- **`IsWriting`, `InBlood`:** blood is chosen when writing starts, so a client rendering a new heading knows whether to make it red. Before a session begins, `WouldBeInBlood` says whether it would be (quill and ink required, blood on, a quill but no ink), unless the player declines the prompt.
+- **`IsWriting`, `InBlood`:** blood is chosen when writing starts, so a client rendering a new heading knows whether to make it red. Before a session begins, `WouldBeInBlood` says whether an `IQ_WRITE_ASK` session would be (quill and ink required, a quill but no ink), unless the player declines the prompt or the session sets `noBlood`.
 - **Changing the structure** (a client's own action, e.g. Physical Diaries' new entry or tear-out, on its own keys): `CurrentRuns(visit, user)` gives the runs as the player has them, unsaved text included; the client renders its text again from those and its change, then `Reload(markedText, readingText, from, count, caretRun, caretOffset)`. `readingText` is the book's text as it now reads (as for a save's reply): a structure change alone (a tear-out) changes no run's text, so the edit key returns to reading without a save, and shows this. `from[i]` is the run that new run `i` was before (-1 for a new one), `count` the number of new runs: each run keeps the text it was last saved with, so unsaved changes still prompt on close. A run that comes back after a `Reload` dropped it (a letter's body locked, then opened again) gives `from[i] = -2 - k`: it counts as saved with the text run `k` had when the session began, so returning it unchanged is no change (no close prompt, no ink). The caret goes to `caretRun` at `caretOffset` (-1: its end).
 
 ## Reacting to typing
@@ -210,6 +218,10 @@ A line starting `# ` (or `## `) is shown as a heading, in the editor and when th
 
 Put **bookmark tags** in the reading text you give the book (not the marked text): `<a href="bookmark:Name">…</a>` where the bookmark should open (choosing it turns to the page, or spread, the tag starts on), for example around a diary entry's heading. The tag can be empty, `<a href="bookmark:Name"></a>`; text inside it shows as normal text. The name is what the player sees in the bookmark list: keep `"` and `>` out of it (an apostrophe is fine: the game turns the `href`'s double quotes into single ones, and Ink & Quill reads the name to the last quote before the `>`). A key you registered (`RegisterKeys`) stays yours even if the player binds the same key to the bookmark list key. The player picks one from Ink & Quill's bookmark list while reading ([EDITOR.md](EDITOR.md#bookmarks)). They live in your text: to add or remove one, render the text with or without its tag. Without Ink & Quill the tagged text shows as plain text.
 
+## Special Ink
+
+Writing with the Quill of Gemination (Skyrim.esm `FVDQuill`, from Vald's Debt) and **Special Ink**: a way of writing like blood, which the client gives a meaning (Physical Letters: a letter in someone else's hand). Begin with `way = IQ_WRITE_SPECIAL_INK`; Ink & Quill checks both items (never free), shows the runs dark purple while writing (the saved text is plain: nothing marks it, unlike blood), and takes **one bottle per accepted save**, checked again at save. `HasQuillOfGemination()` and `HasSpecialInk()` say whether the player could; `InSpecialInk()` that they are. Which item is Special Ink (Ink & Quill's, or Snazzy Location Resources') and how the player gets it: [EDITOR.md](EDITOR.md#special-ink).
+
 ## Writing materials
 
-`HasQuill`, `HasInk`, `UseInk` (`IQ_INK_NONE`, `IQ_INK_USED`, `IQ_INK_RAN_DRY`), `CanBleed`, `Bleed`: the same inkwells and costs as the editor (the player's settings: uses per inkwell, blood cost; they don't check `Writing.RequireQuillAndInk` or `Writing.Blood`, which are the editor's), for a client with its own writing UI. Game state: on the game's thread, as everything that touches the inventory (a UI task or an SKSE task).
+`HasQuill`, `HasInk`, `UseInk` (`IQ_INK_NONE`, `IQ_INK_USED`, `IQ_INK_RAN_DRY`), `CanBleed`, `Bleed`: the same inkwells and costs as the editor (the player's settings: uses per inkwell, blood cost; they don't check `Writing.RequireQuillAndInk`, which is the editor's), for a client with its own writing UI. Game state: on the game's thread, as everything that touches the inventory (a UI task or an SKSE task).

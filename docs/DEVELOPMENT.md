@@ -18,11 +18,11 @@ Options: `-noDeploy`, `-skipScripts`, `-skipSwf`, `-skipEsp`, `-fresh`. The outc
 
 1. It refuses uncommitted changes (a release is a commit); `-allowDirty` makes a test release, marked `-dirty`.
 2. It builds everything with `Build_Local.ps1 -noDeploy`; `-skipBuild` packs the last build.
-3. It stages `00 Core` (the DLL, the ESP, `Scripts`, `Source\Scripts`, `Interface\Translations`), `01 Vanilla` and `02 Convenient Reading` (one `book.swf` each: `Interface\book.swf` and the variant's) and `fomod\`, whose version it sets from `CMakeLists.txt` (the one place the version lives).
+3. It stages `00 Core` (the DLL, the ESP, `Scripts`, `Source\Scripts`, `Interface\Translations`), `01 Vanilla` and `02 Convenient Reading` (one `book.swf` each: `Interface\book.swf` and the variant's), `03 Snazzy Location Resources` and `04 Snazzy Riften` (the "Quill of Gemination" choice's INI, from `fomod-options\`; [EDITOR.md](EDITOR.md#special-ink)) and `fomod\`, whose version it sets from `CMakeLists.txt` (the one place the version lives).
 4. It checks what it staged: both SWFs uncompressed with the writing marker, every translation with English's keys, `ModuleConfig.xml` valid with every folder it installs present.
 5. It zips the stage. The outcome is printed and written to `%TEMP%\iq-release-result.json`.
 
-The installer picks one book menu; Convenient Reading is recommended when `Convenient Reading.esp` is active. That option needs Convenient Reading installed (its `bookmenu.swf`, meshes and `Convenient Reading.ini` stay its own) and Ink & Quill winning the conflict over `book.swf`.
+The installer has two steps. The second, "Quill of Gemination", offers three options, of which the player picks one or none: Snazzy Location Resources, Snazzy Interiors - Riften AIO, and Snazzy Interiors - Riften Black-Briar Manor. Each can only be picked when its plugin is active, and is then recommended, except that Location Resources is only optional when a Riften plugin is active. Both Riften options install the same INI. Picking none uses Ink & Quill's own Special Ink. The dev deploy installs none: to test one, put its INI in the dev mod's `SKSE\Plugins\InkAndQuill\` by hand. The first step picks one book menu; Convenient Reading is recommended when `Convenient Reading.esp` is active. That option needs Convenient Reading installed (its `bookmenu.swf`, meshes and `Convenient Reading.ini` stay its own) and Ink & Quill winning the conflict over `book.swf`.
 
 ## Machine settings
 

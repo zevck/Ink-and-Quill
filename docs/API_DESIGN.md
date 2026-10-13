@@ -51,7 +51,7 @@ Given per session (a blank's registration carries a default):
 | `consume` | an item and count taken on save (parchment), or none |
 | `blood` | allowed or not; when chosen, its cost is taken per save |
 
-Ink & Quill checks and charges: it refuses to start without a quill, offers blood when there's no ink (the choice is made when writing starts, so the text shows red while typing), and takes ink, the item and blood only after the client has accepted the save (below). Discarding costs nothing. Ink and blood are charged **per save** for every client; Physical Diaries' per-session ink and per-entry blood go.
+Ink & Quill checks and charges: it refuses to start without a quill, offers blood when there's no ink unless the client chose the way itself (`IQ_Session::way`, version 2: then only that way is checked, with no prompt) (the choice is made when writing starts, so the text shows red while typing), and takes ink, the item and blood only after the client has accepted the save (below). Discarding costs nothing. Ink and blood are charged **per save** for every client; Physical Diaries' per-session ink and per-entry blood go.
 
 ## A session
 
@@ -77,7 +77,7 @@ UTF-8 text, `\n` line breaks. Blood text between U+E000 and U+E001 (Physical Dia
 
 ## C++ API
 
-Built (version 1): [API.md](API.md) and `api/InkAndQuillAPI.h` are the reference; the sketch below is the design it came from.
+Built (version 2): [API.md](API.md) and `api/InkAndQuillAPI.h` are the reference; the sketch below is the design it came from.
 
 
 C ABI, so clients built with another compiler or CRT work: `InkAndQuill.dll` exports `IQ_GetAPI(version)` returning a struct of function pointers; strings are `const char*` (UTF-8), callbacks are plain function pointers with a `void* user` argument, and every struct starts with its size so later versions can grow it. Clients resolve it at `kPostLoad` (`GetModuleHandle` + `GetProcAddress`, as SkyrimNet's API). Calls are game-thread only unless noted.
@@ -124,6 +124,7 @@ The materials calls are public so a client with its own UI can still share the i
 ## Decided
 
 - Ink and blood per save, for every client (2026-10-02).
+- A client may choose how a session writes (`IQ_Session::way`: ink, blood or Special Ink): only that way's materials are checked, with no prompt. Special Ink (the Quill of Gemination and one bottle per save) is never free (2026-10-12). API versions start here: version 2. Whether a client's books can be written in blood is the client's (its own setting; `noBlood` for a session Ink & Quill decides): Ink & Quill's own blood setting was removed the same day.
 - No limits in the framework; clients impose their own.
 - The edit key does nothing on a book no client owns.
 - VR isn't a target: the editor needs a keyboard; it may work there, untested and unsupported.

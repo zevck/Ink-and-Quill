@@ -4,7 +4,7 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 
 ## The INI
 
-`SKSE\Plugins\InkAndQuill.ini`. Every setting is an integer row in `Settings::kAll` (`[Materials]` aside: lists read by `WritingTools`, also from other mods' own files, [below](#other-mods-quills-and-inkwells)) (section, key, default, range), read at `kDataLoaded` and clamped. A missing file or key is its default; nothing ships an INI. Besides the settings, the INI holds a quill pose saved in adjust mode (`[QuillPose]`, [EDITOR.md](EDITOR.md#quill-cursor)). The MCM changes a setting through `SetSetting`, which writes that one key back at once (`WritePrivateProfileStringA`, so the rest of the file is kept) and takes effect immediately: every reader asks `Settings::Get` when it needs the value.
+`SKSE\Plugins\InkAndQuill.ini`. Every setting is an integer row in `Settings::kAll` (`[Materials]` aside: lists read by `WritingTools`, also from other mods' own files, [below](#other-mods-quills-and-inkwells)) (section, key, default, range), read at `kDataLoaded` and clamped. A missing file or key is its default; nothing ships an INI. Besides the settings, the INI holds a quill pose saved in adjust mode (`[QuillPose]`, [EDITOR.md](EDITOR.md#quill-cursor)). The MCM changes a setting through `SetSetting`, which writes that one key back at once (`WritePrivateProfileStringA`, so the rest of the file is kept) and takes effect immediately: every reader asks `Settings::Get` when it needs the value, except two that `Settings::Set` applies at once: `Debug.Logging` (the log's level) and `Writing.SpecialInkPrice` (the Special Ink's base value).
 
 | Setting | Default | Range | What |
 |---|---|---|---|
@@ -12,9 +12,9 @@ Code: `Settings` (the INI), `Papyrus` (the MCM's natives), `Source/Scripts/InkAn
 | `Keys.Contents` | 199 (Home) | 1–255 | While reading: opens the bookmark list on the open pages; pressed again, closes it ([EDITOR.md](EDITOR.md#bookmarks)) |
 | `Writing.RequireQuillAndInk` | 1 | 0–1 | 0: writing needs no quill and no ink, offers no blood and costs nothing (`Editor`'s `g_free`, decided when writing starts) |
 | `Writing.InkwellUses` | 10 | 0–100 | Saves a full inkwell lasts; 0: inkwells never run dry (none is used or renamed; the MCM shows "Infinite") |
-| `Writing.Blood` | 1 | 0–1 | With a quill but no ink, offer to write in blood. 0: the `NeedsInk` notice instead (a HUD notice on a blank) |
 | `Writing.BloodCost` | 10 | 1–100 | Percent of maximum health each save in blood costs (never below 1 health left) |
 | `Writing.QuillCursor` | 1 | 0–1 | While writing, the game's quill sits at the caret, in place of the blinking caret. 0: the plain caret ([EDITOR.md](EDITOR.md#quill-cursor)) |
+| `Writing.SpecialInkPrice` | 500 | 0–10000 | Base value of Ink & Quill's Special Ink, which Enthir sells (merchants add their markup); greyed out when the FOMOD chose Snazzy's ([EDITOR.md](EDITOR.md#special-ink)) |
 | `Debug.QuillAdjust` | 0 | 0–1 | MCM "Quill adjust mode": shows the quill whatever `Writing.QuillCursor` says, keeps the real caret beside it, and lets the numpad pose it ([EDITOR.md](EDITOR.md#quill-cursor)) |
 | `Debug.Logging` | 0 | 0–1 | MCM "Debug logging": `InkAndQuill.log` at debug level, written to disk line by line: adds the quill's details each time a book opens (the page's vertices and sheets, the camera) and, in adjust mode, where the caret, nib and page corners land on screen. Takes effect as soon as it's changed |
 
@@ -40,9 +40,9 @@ Inkwells = 0x000801~ScribesInk.esl
 
 ## The MCM
 
-One page. Left: the edit key and the bookmark list key, then writing (the quill-and-ink toggle, inkwell uses, blood, blood cost, quill at the cursor; the writing sounds' volume is the game's Settings > Audio, **Writing**). Inkwell uses and blood are greyed out while quill and ink aren't required, and the blood cost while blood is off; the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
+One page. Left: the edit key and the bookmark list key, then writing (the quill-and-ink toggle, inkwell uses, blood cost, the Special Ink price in steps of 50, quill at the cursor; the writing sounds' volume is the game's Settings > Audio, **Writing**). Inkwell uses and blood cost are greyed out while quill and ink aren't required; the Special Ink price while the FOMOD chose Snazzy's ink (Enthir sells none then); the quill toggle never is. Right: **Debug** (quill adjust mode, debug logging), then **the mods using Ink & Quill**.
 
-The natives (`InkAndQuill_MCM`, global): `GetSetting`, `SetSetting`, `GetSettingDefault`, `GetSettingMin`, `GetSettingMax` by `"Section.Key"` (any case; an unknown name reads 0, logged), `GetKeyProblem`, and `GetClientCount`, `GetClientName`.
+The natives (`InkAndQuill_MCM`, global): `GetSetting`, `SetSetting`, `GetSettingDefault`, `GetSettingMin`, `GetSettingMax` by `"Section.Key"` (any case; an unknown name reads 0, logged), `GetKeyProblem`, `GetClientCount`, `GetClientName`, and `IsSpecialInkSold` (true when Enthir sells Ink & Quill's own Special Ink, i.e. no Snazzy option was chosen).
 
 ## The mod list
 

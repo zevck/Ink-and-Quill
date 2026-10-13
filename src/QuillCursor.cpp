@@ -19,6 +19,7 @@
 
 #include "QuillCursor.h"
 
+#include "Gemination.h"
 #include "QuillPaper.h"
 
 #include "BookMovie.h"
@@ -661,7 +662,9 @@ namespace InkAndQuill::QuillCursor {
         if (!menu) return;
         auto& data = menu->GetRuntimeData();
         auto* book = data.bookModel ? data.bookModel->AsNode() : nullptr;
-        auto* item = RE::TESForm::LookupByID<RE::TESObjectMISC>(kQuill);
+        // The Quill of Gemination's own model while the player carries it (a mod may give it its own look).
+        RE::TESForm* quillForm = Gemination::HasQuill() ? Gemination::Quill() : RE::TESForm::LookupByID(kQuill);
+        auto* item = quillForm ? quillForm->As<RE::TESModel>() : nullptr;
         if (!book || !data.pageTextGeo || !item || !item->GetModel() || !*item->GetModel()) {
             SKSE::log::warn("[Quill] No book model, page or quill model");
             return;

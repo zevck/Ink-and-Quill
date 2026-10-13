@@ -53,5 +53,82 @@ Requires: https://www.nexusmods.com/skyrimspecialedition/mods/50202</description
                 </group>
             </optionalFileGroups>
         </installStep>
+        <installStep name="Quill of Gemination">
+            <optionalFileGroups order="Explicit">
+                <group name="Quill of Gemination" type="SelectAtMostOne">
+                    <plugins order="Explicit">
+                        <plugin name="Snazzy Location Resources">
+                            <description>Uses the quill model and Special Ink from Snazzy Location Resources by gutmaw. The quill and Special Ink recipe will be placed in Maven's inventory after completing Vald's Debt.</description>
+                            <files>
+                                <folder source="03 Snazzy Location Resources" destination="" />
+                            </files>
+                            <typeDescriptor>
+                                <dependencyType>
+                                    <defaultType name="NotUsable" />
+                                    <patterns>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Snazzy Interiors - Riften AIO.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Optional" />
+                                        </pattern>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Snazzy Interiors - Riften Black-Briar Manor.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Optional" />
+                                        </pattern>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Snazzy Location Resources.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Recommended" />
+                                        </pattern>
+                                    </patterns>
+                                </dependencyType>
+                            </typeDescriptor>
+                        </plugin>
+                        <plugin name="Snazzy Interiors - Riften AIO">
+                            <description>Uses the quill and Special Ink from Snazzy Interiors - Riften AIO by gutmaw. The quill and Special Ink recipe can be found in Black-Briar Manor after completing Vald's Debt.</description>
+                            <files>
+                                <folder source="04 Snazzy Riften" destination="" />
+                            </files>
+                            <typeDescriptor>
+                                <dependencyType>
+                                    <defaultType name="NotUsable" />
+                                    <patterns>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Snazzy Interiors - Riften AIO.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Recommended" />
+                                        </pattern>
+                                    </patterns>
+                                </dependencyType>
+                            </typeDescriptor>
+                        </plugin>
+                        <plugin name="Snazzy Interiors - Riften Black-Briar Manor">
+                            <description>Uses the quill and Special Ink from Snazzy Interiors - Riften Black-Briar Manor by gutmaw. The quill and Special Ink recipe can be found in Black-Briar Manor after completing Vald's Debt.</description>
+                            <files>
+                                <folder source="04 Snazzy Riften" destination="" />
+                            </files>
+                            <typeDescriptor>
+                                <dependencyType>
+                                    <defaultType name="NotUsable" />
+                                    <patterns>
+                                        <pattern>
+                                            <dependencies operator="And">
+                                                <fileDependency file="Snazzy Interiors - Riften Black-Briar Manor.esp" state="Active" />
+                                            </dependencies>
+                                            <type name="Recommended" />
+                                        </pattern>
+                                    </patterns>
+                                </dependencyType>
+                            </typeDescriptor>
+                        </plugin>
+                    </plugins>
+                </group>
+            </optionalFileGroups>
+        </installStep>
     </installSteps>
 </config>

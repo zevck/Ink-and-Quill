@@ -17,10 +17,11 @@ class BookMenu extends MovieClip
    static var BookMenuInstance;
    // Read as plain text by the plugins (WritingMode.cpp; the SWF ships uncompressed): installed, it turns writing on.
    // Mod-neutral: Ink & Quill ships it for every client.  Bump when a call is added; a plugin needs at least its version.
-   static var WRITING_INTERFACE = "BOOKMENU_WRITING_INTERFACE=5";
+   static var WRITING_INTERFACE = "BOOKMENU_WRITING_INTERFACE=6";
    // Text written in blood (2): dark red, marked in the plugin's text between these two
    // private-use characters (see EditBuildMarked, MarkBlood).
    static var BLOOD_COLOR = 0x2B0202;
+   static var SPECIAL_INK_COLOR = 0x1E1024;  // dark purple: shown while writing only, the saved text is plain
    static var BLOOD_OPEN = 0xE000;
    static var BLOOD_CLOSE = 0xE001;
    // Marked text (4): what the client locks is between these two (see EditBuildMarked).
@@ -71,6 +72,7 @@ class BookMenu extends MovieClip
    var iContentsShownFrom;   // books: the list's spread in the engine's 4 page slots (0 or 2), like iEditShownFrom
    var sBookText;        // the text reading shows now (SetBookText): ReturnToReading with no text reads it again
    var bBlood;           // this writing session is in blood: typed text is red (EditSetBlood)
+   var bSpecialInk;      // this session is in Special Ink: the runs show dark purple (EditSetSpecialInk)
    var oEditMarked;      // marked text from the plugin (SetEditMarked) for the next edit mode: {text, font, size}
    var aEditPageBottoms; // y where each page's text ends (a [pagebreak] line is on neither page)
 
@@ -155,6 +157,7 @@ class BookMenu extends MovieClip
          this.ContentsClip._visible = false;
       }
       this.bBlood = false;
+      this.bSpecialInk = false;
       this.bHideCaret = false;
       // The page being read (at the book's opening: page 0). A book's spread is in engine
       // slots 0-1 or 2-3 (see iEditShownFrom); editing starts on the same page and slots.
@@ -450,7 +453,11 @@ class BookMenu extends MovieClip
          {
             this.StyleLockedHeadings(k);
          }
-         if(segs[k].editable)
+         if(segs[k].editable && this.bSpecialInk)
+         {
+            this.FormatBreaks(k);  // a Reload in Special Ink: the runs purple again (FormatBreaks styles the headings)
+         }
+         else if(segs[k].editable)
          {
             this.StyleHeadings(k);
          }
@@ -607,6 +614,13 @@ class BookMenu extends MovieClip
       {
          this.EditField.setTextFormat(start, end, this.oContentFmt);
       }
+      // Special Ink: the whole run, while writing (nothing of it is saved: a forgery leaves no trace).
+      if(this.bSpecialInk)
+      {
+         var ink = new TextFormat();
+         ink.color = BookMenu.SPECIAL_INK_COLOR;
+         this.EditField.setTextFormat(start, end, ink);
+      }
       // Text written in blood stays red.
       var blood = this.aSegs[k].blood;
       if(blood != undefined && blood.length)
@@ -629,6 +643,21 @@ class BookMenu extends MovieClip
    function EditSetBlood(on)
    {
       this.bBlood = on == true;
+   }
+
+   // From the plugin: this session writes in Special Ink: every run shows dark purple until the session ends.
+   function EditSetSpecialInk(on)
+   {
+      this.bSpecialInk = on == true;
+      var k = 0;
+      while(this.aSegs != undefined && k < this.aSegs.length)
+      {
+         if(this.aSegs[k].editable)
+         {
+            this.FormatBreaks(k);
+         }
+         k++;
+      }
    }
 
    // Ranges sorted, overlapping and touching ones joined, empty ones dropped.

@@ -30,6 +30,12 @@ namespace InkAndQuill::WritingTools {
     // entry, in memory, so every restock has them and no record is overridden.
     void AddToMerchants();
 
+    // A vendor faction's merchant chest's base record (where an in-memory stock entry goes), or nullptr.
+    RE::TESObjectCONT* MerchantChest(const RE::TESFaction* faction);
+
+    // How many of item the player carries.
+    int Count(RE::PlayerCharacter* player, RE::TESBoundObject* item);
+
     // The player carries a quill.
     bool HasQuill();
 

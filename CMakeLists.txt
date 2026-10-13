@@ -33,11 +33,13 @@ set(sources
     src/Clipboard.cpp
     src/Clients.cpp
     src/Editor.cpp
+    src/Gemination.cpp
     src/Input.cpp
     src/Keys.cpp
     src/Papyrus.cpp
     src/QuillCursor.cpp
     src/QuillPaper.cpp
+    src/Serialization.cpp
     src/Settings.cpp
     src/Strings.cpp
     src/Suggestions.cpp
