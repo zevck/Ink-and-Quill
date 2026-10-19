@@ -21,7 +21,7 @@ class BookMenu extends MovieClip
    // Text written in blood (2): dark red, marked in the plugin's text between these two
    // private-use characters (see EditBuildMarked, MarkBlood).
    static var BLOOD_COLOR = 0x2B0202;
-   static var SPECIAL_INK_COLOR = 0x1E1024;  // dark purple: shown while writing only, the saved text is plain
+   static var SPECIAL_INK_COLOR = 0x160A1B;  // dark purple: shown while writing only, the saved text is plain
    static var BLOOD_OPEN = 0xE000;
    static var BLOOD_CLOSE = 0xE001;
    // Marked text (4): what the client locks is between these two (see EditBuildMarked).
