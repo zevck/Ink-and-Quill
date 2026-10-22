@@ -131,7 +131,7 @@ namespace InkAndQuill::Gemination {
             for (const auto id : kEnthirFactions) {
                 auto* chest = WritingTools::MerchantChest(RE::TESForm::LookupByID<RE::TESFaction>(id));
                 if (!chest || !ink || chest->GetObjectCount(ink) > 0) continue;
-                if (chest->AddObjectToContainer(ink, 1, nullptr)) {
+                if (WritingTools::AddToChest(chest, ink)) {
                     SKSE::log::info("[Gemination] Enthir sells Special Ink: chest {:08X} (vendor faction {:08X})", chest->GetFormID(), id);
                 }
             }

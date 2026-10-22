@@ -33,6 +33,10 @@ namespace InkAndQuill::WritingTools {
     // A vendor faction's merchant chest's base record (where an in-memory stock entry goes), or nullptr.
     RE::TESObjectCONT* MerchantChest(const RE::TESFaction* faction);
 
+    // `list` as one more entry of `chest`, without extra data: the engine writes out of bounds rolling a leveled entry
+    // whose health isn't 1.0, and CommonLib's AddObjectToContainer gives it 100 (docs/EDITOR.md, Sold).
+    bool AddToChest(RE::TESObjectCONT* chest, RE::TESLevItem* list);
+
     // How many of item the player carries.
     int Count(RE::PlayerCharacter* player, RE::TESBoundObject* item);
 

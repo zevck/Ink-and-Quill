@@ -265,8 +265,8 @@ namespace InkAndQuill::WritingTools {
     }
 
     namespace {
-        // Vanilla's generic world containers (hundreds in houses) stock the misc list too: a merchant using one would
-        // put a quill and an inkwell in all of them.  Same walk as Physical Letters' src/Parchment.cpp: fix both.
+        // Vanilla's generic world containers (hundreds in houses) stock the misc list too: a merchant using one would put
+        // a quill and an inkwell in all of them.  Same walk as Physical Letters' and Physical Diaries': fix all three.
         bool IsGenericContainer(const RE::TESObjectCONT* chest)
         {
             static constexpr std::pair<RE::FormID, std::string_view> kGeneric[] = { { 0x024CA4, "Skyrim.esm" }, { 0x09AF19, "Skyrim.esm" },
@@ -293,13 +293,25 @@ namespace InkAndQuill::WritingTools {
                                     faction->GetFormID(), chest->GetFormID());
                     continue;
                 }
-                if (!chest->AddObjectToContainer(ours, 1, nullptr)) continue;
+                if (!AddToChest(chest, ours)) continue;
                 ++stocked;
                 SKSE::log::info("[WritingTools] Stocked chest {:08X} '{}' (vendor faction {:08X})", chest->GetFormID(),
                                 chest->GetFormEditorID() ? chest->GetFormEditorID() : "", faction->GetFormID());
             }
             SKSE::log::info("[WritingTools] Quills and ink always stocked by {} general-goods merchant chest(s)", stocked);
         }
+    }
+
+    bool AddToChest(RE::TESObjectCONT* chest, RE::TESLevItem* list)
+    {
+        if (!chest || !list || !chest->AddObjectToContainer(list, 1, nullptr)) return false;
+        for (std::uint32_t i = 0; i < chest->numContainerObjects; ++i) {
+            auto* entry = chest->containerObjects[i];
+            if (!entry || entry->obj != list || !entry->itemExtra) continue;
+            delete entry->itemExtra;  // the game's heap (TES_HEAP_REDEFINE_NEW)
+            entry->itemExtra = nullptr;
+        }
+        return true;
     }
 
     void AddToMerchants()
