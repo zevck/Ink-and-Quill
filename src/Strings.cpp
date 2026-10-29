@@ -76,7 +76,9 @@ namespace InkAndQuill::Strings {
         g_strings.clear();
         // English first, so a key a translation lacks still has its text.
         const bool english = Read("ENGLISH");
-        if (const auto language = Language(); language != "ENGLISH" && !Read(language)) {
+        const auto language = Language();
+        SKSE::log::info("[Strings] Game language (sLanguage): {}", language);
+        if (language != "ENGLISH" && !Read(language)) {
             SKSE::log::info("[Strings] No translation for {}: English", language);
         }
         if (!english) SKSE::log::error("[Strings] Interface/Translations/InkAndQuill_ENGLISH.txt is missing");

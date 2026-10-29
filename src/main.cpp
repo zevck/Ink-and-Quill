@@ -91,6 +91,9 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
     InitializeLog();
     // log = false: InitializeLog set up our logger, and CommonLib's would replace it.
     SKSE::Init(a_skse, { .log = false });
+    // The game and SKSE, for bug reports.
+    SKSE::log::info("Game: Skyrim {} {}, SKSE {}", REL::Module::IsVR() ? "VR" : REL::Module::IsAE() ? "AE" : "SE",
+                    a_skse->RuntimeVersion().string("."), REL::Version::unpack(a_skse->SKSEVersion()).string("."));
     if (auto* messaging = SKSE::GetMessagingInterface(); !messaging || !messaging->RegisterListener(OnMessage)) {
         SKSE::log::error("Couldn't register for SKSE messages");
         return false;

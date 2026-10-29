@@ -700,6 +700,10 @@ namespace InkAndQuill::Editor {
             // key that doesn't combine gives two).
             BYTE keyState[256] = {};
             GetKeyboardState(keyState);
+            // Modifiers as the keyboard has them now: the thread's state can lack them (Ctrl+V typed "v" on 1.7.104).
+            for (const int key : { VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_CONTROL, VK_LCONTROL, VK_RCONTROL, VK_MENU, VK_LMENU, VK_RMENU }) {
+                keyState[key] = (GetAsyncKeyState(key) & 0x8000) ? 0x80 : 0;
+            }
             WCHAR chars[8] = {};
             const auto vk = MapVirtualKeyW(scanCode, MAPVK_VSC_TO_VK);
             // Ctrl (not AltGr, which some layouts type with): Ctrl+V pastes, Ctrl+C copies the run the caret is in.

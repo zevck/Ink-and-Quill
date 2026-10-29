@@ -64,7 +64,7 @@ namespace InkAndQuill::Suggestions {
         RE::GFxValue showing;
         if (!Call("EditSuggesting", &showing) || !showing.IsBool() || !showing.GetBool()) return false;
         if (scanCode == Keys::kTab) {
-            Call("EditSuggestNext", nullptr, (GetKeyState(VK_SHIFT) & 0x8000) ? "-1" : "1");
+            Call("EditSuggestNext", nullptr, (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? "-1" : "1");
             return true;
         }
         if (scanCode == Keys::kRight) {
