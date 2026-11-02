@@ -43,9 +43,10 @@ namespace InkAndQuill::Gemination {
 
         // Snazzy Location Resources by gutmaw: its Special Ink and the recipe for it; its Riften interiors place both.
         constexpr std::string_view kSnazzy = "Snazzy Location Resources.esp";
-        constexpr RE::FormID kSnazzyInk = 0x05CE2A;   // FVD_SpecialInk01
-        constexpr RE::FormID kSnazzyNote = 0x05CE28;  // GM_RecipeSpecialInkNOTE01
-        constexpr std::string_view kSnazzyRiften[] = { "Snazzy Interiors - Riften AIO.esp", "Snazzy Interiors - Riften Black-Briar Manor.esp" };
+        constexpr std::string_view kSnazzyInkId = "FVD_SpecialInk01";
+        constexpr RE::FormID kSnazzyInk = 0x05CE2A;
+        constexpr std::string_view kSnazzyNoteId = "GM_RecipeSpecialInkNOTE01";
+        constexpr RE::FormID kSnazzyNote = 0x05CE28;
 
         // The FOMOD's "Quill of Gemination" choice (docs/EDITOR.md#special-ink).
         enum class Snazzy { None, Resources, Riften };
@@ -56,6 +57,15 @@ namespace InkAndQuill::Gemination {
         RE::TESObjectMISC* g_ownInk = nullptr;
         RE::TESBoundObject* g_note = nullptr;  // Snazzy's recipe, with Snazzy::Resources
         bool g_onMaven = false;               // this save's Maven has had the quill (the co-save)
+
+        // A record of Snazzy's: by EditorID (kept with powerofthree's Tweaks), else by FormID.  Not
+        // LookupForm<TESBoundObject>: it compares form types, and that base class has none.
+        RE::TESBoundObject* SnazzyForm(RE::TESDataHandler* data, std::string_view editorId, RE::FormID id)
+        {
+            auto* form = RE::TESForm::LookupByEditorID(editorId);
+            if (!form) form = data->LookupForm(id, kSnazzy);
+            return form ? form->As<RE::TESBoundObject>() : nullptr;
+        }
 
         Snazzy ReadChoice()
         {
@@ -69,25 +79,14 @@ namespace InkAndQuill::Gemination {
             return Snazzy::None;
         }
 
-        // The FOMOD's choice, as far as the plugins it names are loaded (logged when one is missing).
+        // The FOMOD's choice decides.  Only an ink that can't be found (Snazzy removed since) falls back to ours.
         void Resolve(RE::TESDataHandler* data)
         {
             g_snazzy = ReadChoice();
-            if (g_snazzy == Snazzy::None) return;
-            if (!data->LookupLoadedModByName(kSnazzy)) {
-                SKSE::log::warn("[Gemination] The FOMOD chose Snazzy, but {} isn't loaded: Ink & Quill's own Special Ink", kSnazzy);
+            if (g_snazzy != Snazzy::None && !SnazzyForm(data, kSnazzyInkId, kSnazzyInk)) {
+                SKSE::log::error("[Gemination] The FOMOD chose Snazzy, but {} has no Special Ink ({} or {:06X}): Ink & Quill's own instead",
+                                 kSnazzy, kSnazzyInkId, kSnazzyInk);
                 g_snazzy = Snazzy::None;
-                return;
-            }
-            if (!data->LookupForm<RE::TESBoundObject>(kSnazzyInk, kSnazzy)) {
-                SKSE::log::error("[Gemination] {} has no Special Ink at {:06X}: Ink & Quill's own instead", kSnazzy, kSnazzyInk);
-                g_snazzy = Snazzy::None;
-                return;
-            }
-            if (g_snazzy == Snazzy::Riften &&
-                std::ranges::none_of(kSnazzyRiften, [data](auto name) { return data->LookupLoadedModByName(name) != nullptr; })) {
-                SKSE::log::warn("[Gemination] The FOMOD chose Snazzy's Riften, but no Riften interior is loaded: the quill and recipe go on Maven");
-                g_snazzy = Snazzy::Resources;
             }
         }
 
@@ -147,8 +146,8 @@ namespace InkAndQuill::Gemination {
         g_ownInk = data->LookupForm<RE::TESObjectMISC>(kSpecialInk, kPlugin);
         if (g_ownInk) g_ownInk->fullName = Strings::Get("$IQ_SpecialInkName").c_str();
         Resolve(data);
-        g_ink = g_snazzy != Snazzy::None ? data->LookupForm<RE::TESBoundObject>(kSnazzyInk, kSnazzy) : g_ownInk;
-        g_note = g_snazzy == Snazzy::Resources ? data->LookupForm<RE::TESBoundObject>(kSnazzyNote, kSnazzy) : nullptr;
+        g_ink = g_snazzy != Snazzy::None ? SnazzyForm(data, kSnazzyInkId, kSnazzyInk) : g_ownInk;
+        g_note = g_snazzy == Snazzy::Resources ? SnazzyForm(data, kSnazzyNoteId, kSnazzyNote) : nullptr;
         if (!g_quill || !g_ink) SKSE::log::error("[Gemination] No Quill of Gemination or Special Ink record: no Special Ink");
         SKSE::log::info("[Gemination] Special Ink: {}", g_snazzy == Snazzy::None ? "Ink & Quill's, sold by Enthir"
                                                        : g_snazzy == Snazzy::Resources ? "Snazzy's; quill and recipe on Maven"
