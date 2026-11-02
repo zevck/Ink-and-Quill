@@ -40,7 +40,8 @@ struct IQ_SaveReply {
 // IQ_WriteWay is Editor::Way, value for value.
 static_assert(static_cast<int>(InkAndQuill::Editor::Way::Ask) == IQ_WRITE_ASK && static_cast<int>(InkAndQuill::Editor::Way::Ink) == IQ_WRITE_INK &&
               static_cast<int>(InkAndQuill::Editor::Way::Blood) == IQ_WRITE_BLOOD &&
-              static_cast<int>(InkAndQuill::Editor::Way::SpecialInk) == IQ_WRITE_SPECIAL_INK);
+              static_cast<int>(InkAndQuill::Editor::Way::SpecialInk) == IQ_WRITE_SPECIAL_INK &&
+              static_cast<int>(InkAndQuill::Editor::Way::Free) == IQ_WRITE_FREE);
 
 
 namespace {
@@ -63,7 +64,7 @@ namespace {
         }
         IQ_Session c{};
         std::memcpy(&c, in, std::min<std::size_t>(in->size, sizeof(IQ_Session)));
-        if (c.way < IQ_WRITE_ASK || c.way > IQ_WRITE_SPECIAL_INK) {
+        if (c.way < IQ_WRITE_ASK || c.way > IQ_WRITE_FREE) {
             SKSE::log::error("[API] A session with an unknown way ({}): ignored", c.way);
             if (c.onEnd) c.onEnd(c.user);
             return std::nullopt;

@@ -48,7 +48,7 @@ namespace InkAndQuill::Editor {
     };
 
     // How a session writes: Ask lets Ink & Quill decide (ink, else blood offered); the others are the client's choice.
-    enum class Way { Ask, Ink, Blood, SpecialInk };
+    enum class Way { Ask, Ink, Blood, SpecialInk, Free };
 
     struct Client {
         std::function<Saved(const std::vector<std::string>& bodies)> onSave;  // the bodies in page order

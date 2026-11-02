@@ -839,6 +839,31 @@ class BookMenu extends MovieClip
       return after >= 0 ? after : before;
    }
 
+   // The caret position in a body nearest pos, among those from lo to hi (one line), or -1.
+   function EditNearestInRange(pos, lo, hi)
+   {
+      var best = -1;
+      var k = 0;
+      while(k < this.aSegs.length)
+      {
+         if(this.aSegs[k].editable)
+         {
+            var s = Math.max(this.BodyStart(k), lo);
+            var e = Math.min(this.BodyEnd(k), hi);
+            if(s <= e)
+            {
+               var p = Math.min(Math.max(pos, s), e);
+               if(best < 0 || Math.abs(p - pos) < Math.abs(best - pos))
+               {
+                  best = p;
+               }
+            }
+         }
+         k++;
+      }
+      return best;
+   }
+
    // The book's text has arrived (SetBookText, which comes after the menu opens): edit mode
    // can start.
    function EditReady()
@@ -1522,6 +1547,14 @@ class BookMenu extends MovieClip
             var otherStart = tf.getLineOffset(other);
             var otherEnd = other + 1 < tf.numLines ? tf.getLineOffset(other + 1) - 1 : len;
             target = Math.min(otherStart + col, otherEnd);
+            // A line with writable text keeps the caret: past a short line's end it would skip ahead.
+            var onLine = this.EditNearestInRange(target, otherStart, otherEnd);
+            if(onLine >= 0)
+            {
+               this.EditSetCaret(onLine);
+               this.EditLayout();
+               return undefined;
+            }
          }
       }
       if(target < 0 || target > len)

@@ -61,7 +61,7 @@ namespace InkAndQuill::Editor {
         std::atomic<bool> g_prompting{ false };  // a prompt is open over the book: keys belong to it
         bool g_blood = false;                    // this session is in blood (no ink)
         bool g_special = false;                  // this session is in Special Ink (the Quill of Gemination's)
-        bool g_free = false;                     // this session needs no quill or ink (Settings::kRequireQuillAndInk off)
+        bool g_free = false;                     // this session needs no quill or ink (Way::Free, or kRequireQuillAndInk off)
         RE::FormID g_beginOnOpen = 0;            // begin g_session once this book is open with its text
 
         // Blanks (docs/EDITOR.md#blanks).
@@ -304,7 +304,7 @@ namespace InkAndQuill::Editor {
                 }
             }
             for (std::size_t i = 0; i < bodies->size(); ++i) g_edit[i] = { (*bodies)[i] };
-            if (g_sessionBlank != 0) ReplaceBlank(saved.book);
+            if (g_sessionBlank != 0 && saved.book != 0) ReplaceBlank(saved.book);  // ReplySave: the blank stays
             if (auto* book = RE::BookMenu::GetTargetForm()) g_touched.insert(book->GetFormID());
             if (!g_free && !g_blood && !g_special && WritingTools::LastInkwell() != 0) g_touched.insert(WritingTools::LastInkwell());
             if (readText) *readText = std::move(saved.text);
@@ -361,7 +361,7 @@ namespace InkAndQuill::Editor {
                 movie->Invoke("_root.BookMenu_mc.EditFocusEntry", nullptr, &run, 1);
             }
             if (const auto onBegin = g_session.client.onBegin) {  // a copy: the session may end in it
-                onBegin(g_special ? Way::SpecialInk : g_blood ? Way::Blood : Way::Ink);
+                onBegin(g_session.way == Way::Free ? Way::Free : g_special ? Way::SpecialInk : g_blood ? Way::Blood : Way::Ink);
             }
         }
 
@@ -525,13 +525,13 @@ namespace InkAndQuill::Editor {
         }
 
         // The session's way (docs/EDITOR.md#starting): Ask is a quill, then ink or the blood prompt; a client's choice
-        // checks only its own materials.  Special Ink is never free.  Then edit mode.
+        // checks only its own materials.  Special Ink is never free; Free always is.  Then edit mode.
         void Start()
         {
             const auto way = g_session.way;
             g_blood = way == Way::Blood;
             g_special = way == Way::SpecialInk;
-            g_free = !g_special && !Settings::Get(Settings::kRequireQuillAndInk);
+            g_free = way == Way::Free || (!g_special && !Settings::Get(Settings::kRequireQuillAndInk));
             if (auto* ui = RE::UI::GetSingleton(); ui && !ui->GameIsPaused()) {
                 SKSE::log::info("[Editor] The book menu doesn't pause the game (Skyrim Souls?)");
             }
